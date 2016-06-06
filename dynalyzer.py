@@ -5,7 +5,7 @@ from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal
 from PyQt5.QtGui import QImage
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QTransform
-from PyQt5.QtQuick import QQuickImageProvider
+from PyQt5.QtQuick import QQuickImageProvider, QQuickPaintedItem
 from PyQt5.QtQml import qmlRegisterType
 
 def parse_config(filename, rotate=True):
@@ -122,80 +122,12 @@ def read_analog_data(filename):
 
 ### GUI related classes
 
-
-class SpectrumImageProvider(QQuickImageProvider):
-	def __init__(self, analyzer):
-		QQuickImageProvider.__init__(self, QQuickImageProvider.Image)
-		
-		self.analyzer = analyzer
-		
-	
-	def requestImage(self, id, requested_size):
-		x_str, y_str = id.split(',');
-		
-		xindex = int(x_str)
-		yindex = int(y_str)
-				
-		if xindex >= self.analyzer.analysis.shape[-1]:
-			print('x out of range:' + str(xindex))
-			xindex = 0
-			
-		if yindex >= self.analyzer.analysis.shape[-2]:
-			print('y out of range:' + str(yindex))
-			yindex = 0
-			
-		data = self.analyzer.analysis[:,1:,yindex,xindex].transpose()
-		
-		normalized = 256*(data/self.analyzer.max_value)**0.3
-		
-		# Lines should be 32 bit aligned
-		imagearr = np.zeros((normalized.shape[0], (normalized.shape[1]+3)//4 * 4))
-		imagearr[:,0:normalized.shape[1]] = normalized
-		
-		imagestr = np.uint8(imagearr.flatten()).tobytes()
-		image_height, image_width = data.shape
-		qimg = QImage(imagestr, image_width, image_height, QImage.Format_Grayscale8)
-		qimg = qimg.mirrored().scaled(800, 600)
-		
-		self.image = qimg # avoid gc
-		return qimg, qimg.size()
-	
-
-class OverlayImageProvider(QQuickImageProvider):
-	def __init__(self, analyzer):
-		QQuickImageProvider.__init__(self, QQuickImageProvider.Image)
-		
-		self.analyzer = analyzer
-	
-	
-	def requestImage(self, id, requested_size):
-		pos_str, frequency_str, treshold_str = id.split(',')
-		
-		frameindex = int(pos_str)
-		frequency = int(frequency_str)
-		treshold = float(treshold_str)
-		
-		step = (frameindex - self.analyzer.t0) // self.analyzer.analysis_step
-		
-		data = self.analyzer.analysis[step, frequency, :, :] > treshold
-
-		imagearr = np.zeros((data.shape[0], data.shape[1], 4), dtype="uint8")
-		imagearr[:,:, 3] = data*255
-		imagearr[:,:, 0] = 255
-		imagestr = imagearr.flatten().tobytes()
-		image_height, image_width = data.shape
-		qimg = QImage(imagestr, image_width, image_height, QImage.Format_ARGB32)
-		
-		self.image = qimg
-	
-		return qimg, qimg.size()
-			
-	
 class FourierAnalyzer(QObject):
 	
 	folderLoaded = pyqtSignal()
+	analysisComplete = pyqtSignal()
 	
-	def __init__(self, folder, parent=None):
+	def __init__(self, parent=None):
 		QObject.__init__(self, parent)
 		
 		self.data_folder = None
@@ -209,8 +141,6 @@ class FourierAnalyzer(QObject):
 		self.max_value = None
 		self.analysis_window = 50
 		self.analysis_step = 5
-		
-		self.folder = folder
 	
 	@pyqtProperty(str, notify=folderLoaded)
 	def folder(self):
@@ -244,7 +174,6 @@ class FourierAnalyzer(QObject):
 		img_width = config.image_width
 		img_height = config.image_height
 		
-		# rotated 90
 		xstart = x
 		ystart = y
 		tstart = t
@@ -257,6 +186,7 @@ class FourierAnalyzer(QObject):
 		section = read_section(self.video_path, xstart, ystart, tstart, xwindow, ywindow, twindow, img_width, img_height)
 		analysis = analyze_section(section, self.analysis_window, self.analysis_step)
 		
+		self.analysisComplete.emit()
 		print('Done.')
 		
 		self.analysis = analysis
@@ -288,6 +218,151 @@ class SnapshotProvider(QQuickImageProvider):
 		return img, img.size()
 
 
+class SnapshotView(QQuickPaintedItem):
+	def __init__(self, parent=None):
+		QQuickPaintedItem.__init__(self, parent)
+		
+		self._analyzer = None
+		self._frame = 0
+
+	@pyqtProperty(int)
+	def frame(self):
+		return self._frame
+	@frame.setter
+	def frame(self, val):
+		self._frame = val
+		self.update()
+
+	@pyqtProperty('QVariant')
+	def analyzer(self):
+		return self._analyzer
+	@analyzer.setter
+	def analyzer(self, val):
+		self._analyzer = val
+		
+	def paint(self, painter):
+		if not self._analyzer or not self._analyzer.ready: return
+		img = self.analyzer.getVideoSnapshot(self._frame)
+		painter.drawImage(0, 0, img)
+		
+
+class OverlayImage(QQuickPaintedItem):
+	def __init__(self, parent=None):
+		QQuickPaintedItem.__init__(self, parent)
+		
+		self._analyzer = None
+		self._frame = 0
+		self._overlay_treshold = 0
+		self._overlay_frequency = 0
+
+	@pyqtProperty(int)
+	def frame(self):
+		return self._frame
+	@frame.setter
+	def frame(self, val):
+		self._frame = val
+		self.update()
+
+	@pyqtProperty('QVariant')
+	def analyzer(self):
+		return self._analyzer
+	@analyzer.setter
+	def analyzer(self, val):
+		self._analyzer = val
+		
+	@pyqtProperty(int)
+	def treshold(self):
+		return self._overlay_treshold
+	@treshold.setter
+	def treshold(self, val):
+		self._overlay_treshold = val
+		self.update()
+		
+	@pyqtProperty(int)
+	def frequency(self):
+		return self._overlay_frequency
+	@frequency.setter
+	def frequency(self, val):
+		self._overlay_frequency = val
+		self.update()
+
+	def paint(self, painter):
+		if self.analyzer is None or self.analyzer.analysis is None: return
+	
+		step = (self.frame - self.analyzer.t0) // self.analyzer.analysis_step
+		if step < 0 or step >= self.analyzer.analysis.shape[0]:
+			return
+		
+		data = self.analyzer.analysis[step, self.frequency, :, :] > self.treshold
+
+		imagearr = np.zeros((data.shape[0], data.shape[1], 4), dtype="uint8")
+		imagearr[:,:, 3] = data*255
+		imagearr[:,:, 0] = 255
+		imagestr = imagearr.flatten().tobytes()
+		image_height, image_width = data.shape
+		qimg = QImage(imagestr, image_width, image_height, QImage.Format_ARGB32)
+		painter.drawImage(0, 0, qimg)
+
+
+class SpectrumImage(QQuickPaintedItem):
+	def __init__(self, parent=None):
+		QQuickPaintedItem.__init__(self, parent)
+		
+		self._analyzer = None
+		self._x = 0
+		self._y = 0
+		
+	@pyqtProperty('QVariant')
+	def analyzer(self):
+		return self._analyzer
+	@analyzer.setter
+	def analyzer(self, val):
+		self._analyzer = val
+		self._analyzer.analysisComplete.connect(self.update)
+		
+	@pyqtProperty(int)
+	def targetX(self):
+		return self._x
+	@targetX.setter
+	def targetX(self, val):
+		self._x = val
+		self.update()
+	
+	@pyqtProperty(int)
+	def targetY(self):
+		return self._y
+	@targetY.setter
+	def targetY(self, val):
+		self._y = val
+		self.update()
+		
+	def paint(self, painter):
+		if self.analyzer is None or self.analyzer.analysis is None: return
+	
+		xindex, yindex = self.targetX, self.targetY
+		
+		if xindex >= self.analyzer.analysis.shape[-1]:
+			print('x out of range:' + str(xindex))
+			xindex = 0
+			
+		if yindex >= self.analyzer.analysis.shape[-2]:
+			print('y out of range:' + str(yindex))
+			yindex = 0
+			
+		data = self.analyzer.analysis[:,1:,yindex,xindex].transpose()
+		
+		normalized = 256*(data/self.analyzer.max_value)**0.3
+		
+		# Lines should be 32 bit aligned
+		imagearr = np.zeros((normalized.shape[0], (normalized.shape[1]+3)//4 * 4))
+		imagearr[:,0:normalized.shape[1]] = normalized
+		
+		imagestr = np.uint8(imagearr.flatten()).tobytes()
+		image_height, image_width = data.shape
+		qimg = QImage(imagestr, image_width, image_height, QImage.Format_Grayscale8)
+		qimg = qimg.mirrored().scaled(self.width(), self.height())
+		painter.drawImage(0, 0, qimg)
+
 if __name__ == '__main__':
 	from PyQt5.QtQml import QQmlApplicationEngine
 	from PyQt5.QtGui import QGuiApplication
@@ -295,20 +370,12 @@ if __name__ == '__main__':
 	
 	app = QApplication(sys.argv)
 	
-	#analyzer = FourierAnalyzer()
-	
-	qmlRegisterType(FourierAnalyzer, "com.dynalyzer", 1, 0, "FourierAnalyzer");
-	
-	snapshotProvider = SnapshotProvider(analyzer)
-	spectrumProvider = SpectrumImageProvider(analyzer)
-	overlayProvider = OverlayImageProvider(analyzer)
+	qmlRegisterType(FourierAnalyzer, "org.dynalyzer", 1, 0, "FourierAnalyzer");
+	qmlRegisterType(SnapshotView, "org.dynalyzer", 1, 0, "SnapshotView");
+	qmlRegisterType(OverlayImage, "org.dynalyzer", 1, 0, "OverlayImage");
+	qmlRegisterType(SpectrumImage, "org.dynalyzer", 1, 0, "SpectrumImage");
 		
 	engine = QQmlApplicationEngine()
-	#engine.rootContext().setContextProperty('analyzer', analyzer)
-	engine.addImageProvider('snapshot', snapshotProvider)
-	engine.addImageProvider('analysis', spectrumProvider)
-	engine.addImageProvider('overlay', overlayProvider)
 	engine.load('dynalyzer.qml')
 	
 	app.exec_()
-

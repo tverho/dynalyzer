@@ -3,20 +3,13 @@ import QtQuick.Controls 1.1
 import QtQuick.Layouts 1.0
 import QtQuick.Dialogs 1.1
 
+import org.dynalyzer 1.0
+
 ColumnLayout {
 	id: main
-	anchors.fill: parent
-	property var analyzer
+	property FourierAnalyzer analyzer
 	
 	RowLayout {
-		Layout.fillWidth: true
-		Label {text: "Folder:"}
-		Label {
-			text: main.analyzer.folder
-			Layout.fillWidth: true
-			Layout.preferredWidth: 0
-			elide: Text.ElideLeft
-		}
 		Button {
 			text: "Browse"
 			onClicked: dataPathDialog.open()
@@ -49,18 +42,24 @@ ColumnLayout {
 	
 	RowLayout {
 		ColumnLayout {
-			Image {
+			SnapshotView {
 				id: cameraImage
-				width: 800
-				height: 800
-				source: main.analyzer.ready? "image://snapshot/" + navigator.curFrame : ""
-				property real selectionX: rect.x
-				property real selectionY: rect.y
-				property real selectionWidth: rect.width
-				property real selectionHeight: rect.height
+				width: 400
+				height: 400
+				analyzer: main.analyzer
+				frame: navigator.curFrame
+				property int selectionX
+				property int selectionY
+				property int selectionWidth
+				property int selectionHeight
+				
 				
 				Rectangle {
-					id: rect
+					id: selectionRect
+					x: cameraImage.selectionX
+					y: cameraImage.selectionY
+					width: cameraImage.selectionWidth
+					height: cameraImage.selectionHeight
 					color: "transparent"
 					border.width: 2
 					border.color: "blue"
@@ -71,26 +70,34 @@ ColumnLayout {
 					acceptedButtons: Qt.RightButton
 					
 					onPressed: {
-						rect.x = mouse.x;
-						rect.y = mouse.y - mouse.y%8;
-						rect.width = 0;
-						rect.height = 0;
+						cameraImage.selectionX = mouse.x;
+						cameraImage.selectionY = mouse.y - mouse.y%8;
+						cameraImage.selectionWidth = 0;
+						cameraImage.selectionHeight = 0;
 					}
 					
 					onPositionChanged: {
-						rect.width = mouse.x - rect.x
-						rect.height = mouse.y-mouse.y%8 - rect.y
+						cameraImage.selectionWidth = mouse.x - cameraImage.selectionX;
+						cameraImage.selectionHeight = mouse.y-mouse.y%8 - cameraImage.selectionY;
 					}
 				}
 				
 				Rectangle {
 					id: analyzedRegion
-					color: "#88000000"
+					color: "#66000000"
+					
+					OverlayImage {
+						id: overlayImage
+						visible: overlayCheckbox.checked
+						anchors.fill: parent
+						analyzer: main.analyzer
+						frame: navigator.curFrame
+						frequency: overlayFrequencyField.text
+						treshold: overlayTresholdField.text
+					}
 					
 					Item {
 						id: cross
-						property real positionX: (x + analyzedRegion.x) / cameraImage.width
-						property real positionY: (y + analyzedRegion.y) / cameraImage.height
 						
 						Rectangle {
 							x: -3
@@ -122,94 +129,16 @@ ColumnLayout {
 						
 					}
 					
-					Image {
-						id: overlayImage
-						anchors.fill: parent
-						source: overlayCheckbox.checked && navigator.curFrameAnalyzed ? "image://overlay/"+navigator.curFrame+","+overlayFrequency.text+","+overlayTreshold.text : ""
-					}
-					
 					function set() {
-						x = rect.x;
-						y = rect.y;
-						width = rect.width;
-						height = rect.height;
+						x = cameraImage.selectionX;
+						y = cameraImage.selectionY;
+						width = cameraImage.selectionWidth;
+						height = cameraImage.selectionHeight;
 					}
 				}
 			}
 			
-			ColumnLayout {
-				id: navigator
-				property int curFrame: 0
-				property int numFrames: main.analyzer.ready? main.analyzer.nFrames : 0
-				
-				property int selectionStart: 0
-				property int selectionEnd: 0
-				
-				property bool curFrameAnalyzed: curFrame >= analyzedInterval.analysisStart && 
-						curFrame <= analyzedInterval.analysisEnd
-				
-				Rectangle {
-					id: slider
-					Layout.minimumHeight: 50
-					Layout.minimumWidth: 1000
-					color: "white"
-					border.color: "black"
-					
-					Rectangle {
-						id: cursor
-						height: parent.height
-						width: 2
-						x: navigator.curFrame * slider.width / navigator.numFrames
-						color: "black"
-					}
-					
-					Rectangle {
-						id: selection
-						height: parent.height
-						color: "blue"
-						opacity: 0.5
-						x: navigator.selectionStart * slider.width / navigator.numFrames
-						width: (navigator.selectionEnd - navigator.selectionStart) * slider.width / navigator.numFrames
-					}
-					
-					Rectangle {
-						id: analyzedInterval
-						height: parent.height
-						color: "#88000000"
-						property int analysisStart
-						property int analysisEnd
-						x: analysisStart * slider.width / navigator.numFrames
-						width: (analysisEnd - analysisStart) * slider.width / navigator.numFrames
-						
-						function set() {
-							analysisStart = navigator.selectionStart;
-							analysisEnd = navigator.selectionEnd;
-						}
-					}
-					
-					MouseArea {
-						anchors.fill: parent
-						acceptedButtons: Qt.LeftButton
-						
-						onPressed: navigator.curFrame = navigator.numFrames * mouse.x / slider.width
-						onPositionChanged: {
-							if (containsMouse)
-								navigator.curFrame = navigator.numFrames * mouse.x / slider.width
-						}
-					}
-					
-					MouseArea {
-						anchors.fill: parent
-						acceptedButtons: Qt.RightButton
-						
-						onPressed: navigator.selectionStart = navigator.numFrames * mouse.x / slider.width
-						onPositionChanged: {
-							if (containsMouse) 
-								navigator.selectionEnd = navigator.numFrames * mouse.x / slider.width
-						}	
-					}
-				}
-			}
+			
 		}
 		
 		ColumnLayout {
@@ -224,7 +153,8 @@ ColumnLayout {
 				}
 				
 				TextField {
-					id: overlayFrequency
+					id: overlayFrequencyField
+					validator: IntValidator {bottom: 0}
 					text: "1"
 				}
 			}
@@ -233,17 +163,123 @@ ColumnLayout {
 					text: "treshold"
 				}
 				TextField {
-					id: overlayTreshold
+					id: overlayTresholdField
+					validator: IntValidator {bottom: 0}
 					text: "10"
 				}
 			}
 			
-			
-			Image {
+			SpectrumImage {
 				id:fourierImage
 				visible: false
-				source: visible? "image://analysis/" + spectrumPos : ""
-				property string spectrumPos: cross.x+","+cross.y
+				width: 800
+				height: 600
+				analyzer: main.analyzer
+				targetX: cross.x
+				targetY: cross.y
+			}
+		}
+	}
+	
+	ColumnLayout {
+		id: navigator
+		property int curFrame: 0
+		property int numFrames: main.analyzer.ready? main.analyzer.nFrames : 0
+		
+		property int selectionStart: 0
+		property int selectionEnd: 0
+		
+		property bool curFrameAnalyzed: curFrame >= analyzedInterval.analysisStart && 
+				curFrame <= analyzedInterval.analysisEnd
+		
+		function setFrame(frame) {
+			if (frame < 0) curFrame = 0;
+			else if (frame > numFrames-1) curFrame = numFrames - 1;
+			else curFrame = frame;
+		}
+		
+		Rectangle {
+			id: slider
+			Layout.minimumHeight: 50
+			Layout.minimumWidth: 1000
+			color: "white"
+			border.color: "black"
+			
+			Rectangle {
+				id: cursor
+				height: parent.height
+				width: 2
+				x: navigator.curFrame * slider.width / navigator.numFrames
+				color: "black"
+			}
+			
+			Rectangle {
+				id: selection
+				height: parent.height
+				color: "blue"
+				opacity: 0.5
+				x: navigator.selectionStart * slider.width / navigator.numFrames
+				width: (navigator.selectionEnd - navigator.selectionStart) * slider.width / navigator.numFrames
+			}
+			
+			Rectangle {
+				id: analyzedInterval
+				height: parent.height
+				color: "#88000000"
+				property int analysisStart
+				property int analysisEnd
+				x: analysisStart * slider.width / navigator.numFrames
+				width: (analysisEnd - analysisStart) * slider.width / navigator.numFrames
+				
+				function set() {
+					analysisStart = navigator.selectionStart;
+					analysisEnd = navigator.selectionEnd;
+				}
+			}
+			
+			MouseArea {
+				anchors.fill: parent
+				acceptedButtons: Qt.LeftButton
+				
+				onPressed: navigator.curFrame = navigator.numFrames * mouse.x / slider.width
+				onPositionChanged: {
+					if (containsMouse)
+						navigator.curFrame = navigator.numFrames * mouse.x / slider.width
+				}
+			}
+			
+			MouseArea {
+				anchors.fill: parent
+				acceptedButtons: Qt.RightButton
+				
+				onPressed: navigator.selectionStart = navigator.numFrames * mouse.x / slider.width
+				onPositionChanged: {
+					if (containsMouse) 
+						navigator.selectionEnd = navigator.numFrames * mouse.x / slider.width
+				}	
+			}
+		}
+		
+		RowLayout {
+			Button {
+				text: "prev"
+				onClicked: navigator.setFrame(navigator.curFrame-1)
+			}
+			
+			TextField {
+				text:navigator.curFrame
+				validator: IntValidator {bottom: 0; top:navigator.numFrames-1}
+				onEditingFinished: navigator.curFrame = text
+				
+				MouseArea {
+					anchors.fill: parent
+					onWheel: navigator.setFrame(navigator.curFrame + (wheel.angleDelta.y > 0? 5 : -5))
+				}
+			}
+			
+			Button {
+				text: "next"
+				onClicked: navigator.setFrame(navigator.curFrame+1)
 			}
 		}
 	}

@@ -3,6 +3,7 @@ import QtQuick.Controls 1.1
 import QtQuick.Layouts 1.0
 import QtQuick.Dialogs 1.1
 
+import org.dynalyzer 1.0
 // context property: analyzer
 
 
@@ -13,22 +14,24 @@ ApplicationWindow {
 		
 	TabView {
 		id: tabview
-		anchors.fill: parent
-	}	
-	Component {
-		id: tab
-		property var analyzer
+		width: 1200
+		height: 600
+	
 		Tab {
-			title: view.analyzer.folder
+			id: tab
+			title: folder
+			property string folder: "/home/tuukka/measurement data/dynamat/20160305 Molmat/20160503_0425"
+			
 			AnalysisView {
-				analyzer: tab.analyzer
+				analyzer: analyzer
+				
+				FourierAnalyzer {
+					id:analyzer
+					folder: tab.folder
+				}
 			}
+			
+			
 		}
 	}
-		
-	
-	Component.onCompleted:{
-		var analyzer = FourierAnalyzer("/home/tuukka/measurement data/dynamat/20160305 Molmat/20160503_0425");
-		tab.analyzer = analyzer;
-		tabview.addTab(tab);
 }
