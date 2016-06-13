@@ -4,18 +4,18 @@ import QtQuick.Layouts 1.0
 import QtQuick.Dialogs 1.1
 
 import org.dynalyzer 1.0
-// context property: analyzer
 
 
 ApplicationWindow {
 	id: app
 	visible: true
+	width: 1000
+	height: 800
 	title: "Dynalyzer"
-		
+	
 	TabView {
 		id: tabview
-		width: 1200
-		height: 600
+		anchors.fill: parent
 	
 		Tab {
 			id: tab
@@ -24,10 +24,22 @@ ApplicationWindow {
 			
 			AnalysisView {
 				analyzer: analyzer
+				hpAnalyzer: hpAnalyzer
+				measurementData: data
+				
+				MeasurementData {
+					id: data
+					folder: tab.folder
+				}
 				
 				FourierAnalyzer {
 					id:analyzer
-					folder: tab.folder
+					measurementData: data
+				}
+				
+				BandPassAnalyzer {
+					id: hpAnalyzer
+					measurementData: data
 				}
 			}
 			

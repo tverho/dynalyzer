@@ -7,6 +7,8 @@ import org.dynalyzer 1.0
 
 ColumnLayout {
 	id: main
+	property MeasurementData measurementData
+	property BandPassAnalyzer hpAnalyzer
 	property FourierAnalyzer analyzer
 	
 	RowLayout {
@@ -22,44 +24,38 @@ ColumnLayout {
 			}
 		}
 		
-		Button {
-			text: "Analyze"
-			
-			onClicked: {
-				var x = cameraImage.selectionX;
-				var y = cameraImage.selectionY;
-				var width = cameraImage.selectionWidth;
-				var height = cameraImage.selectionHeight;
-				var tstart = navigator.selectionStart;
-				var twindow = navigator.selectionEnd - tstart;
-				main.analyzer.analyze(x, y, tstart, width, height, twindow);
-				analyzedRegion.set();
-				analyzedInterval.set();
-				fourierImage.visible = true;
-			}
-		}
+		
 	}
 	
 	RowLayout {
 		ColumnLayout {
-			SnapshotView {
-				id: cameraImage
-				width: 400
-				height: 400
-				analyzer: main.analyzer
-				frame: navigator.curFrame
+			Rectangle {
+				id: cameraView
+				Layout.fillHeight: true
+				Layout.minimumWidth: 400
+ 				color: "transparent"
+				property int frame: navigator.curFrame
+				property real scaleFactor: Math.min(width/measurementData.image_width, height/measurementData.image_height)
+				
 				property int selectionX
 				property int selectionY
 				property int selectionWidth
 				property int selectionHeight
 				
+				SnapshotView {
+					anchors.fill: parent
+					measurementData: main.measurementData
+					frame: parent.frame
+					scale: parent.scaleFactor
+					transformOrigin: Item.TopLeft
+				}
 				
 				Rectangle {
 					id: selectionRect
-					x: cameraImage.selectionX
-					y: cameraImage.selectionY
-					width: cameraImage.selectionWidth
-					height: cameraImage.selectionHeight
+					x: cameraView.selectionX *cameraView.scaleFactor
+					y: cameraView.selectionY *cameraView.scaleFactor
+					width: cameraView.selectionWidth *cameraView.scaleFactor
+					height: cameraView.selectionHeight *cameraView.scaleFactor
 					color: "transparent"
 					border.width: 2
 					border.color: "blue"
@@ -70,30 +66,45 @@ ColumnLayout {
 					acceptedButtons: Qt.RightButton
 					
 					onPressed: {
-						cameraImage.selectionX = mouse.x;
-						cameraImage.selectionY = mouse.y - mouse.y%8;
-						cameraImage.selectionWidth = 0;
-						cameraImage.selectionHeight = 0;
+						cameraView.selectionX = mouse.x / cameraView.scaleFactor;
+						cameraView.selectionY = mouse.y / cameraView.scaleFactor;
+						cameraView.selectionY -= cameraView.selectionY % 8;
+						cameraView.selectionWidth = 0;
+						cameraView.selectionHeight = 0;
 					}
 					
-					onPositionChanged: {
-						cameraImage.selectionWidth = mouse.x - cameraImage.selectionX;
-						cameraImage.selectionHeight = mouse.y-mouse.y%8 - cameraImage.selectionY;
+					onPositionChanged: if (containsMouse) {
+						cameraView.selectionWidth = mouse.x/cameraView.scaleFactor - cameraView.selectionX;
+						cameraView.selectionHeight = mouse.y/cameraView.scaleFactor - cameraView.selectionY;
+						cameraView.selectionHeight -= cameraView.selectionHeight % 8;
 					}
 				}
 				
 				Rectangle {
 					id: analyzedRegion
+					visible: false
 					color: "#66000000"
+					property int dataX
+					property int dataY
+					property int dataWidth
+					property int dataHeight
+					property int cursorX: cross.x / scale
+					property int cursorY: cross.y / scale
+					x: dataX * cameraView.scaleFactor
+					y: dataY * cameraView.scaleFactor
+					width: dataWidth * cameraView.scaleFactor
+					height: dataHeight * cameraView.scaleFactor
 					
-					OverlayImage {
+					BPFOverlayImage {
 						id: overlayImage
 						visible: overlayCheckbox.checked
 						anchors.fill: parent
-						analyzer: main.analyzer
+						analyzer: main.hpAnalyzer
 						frame: navigator.curFrame
-						frequency: overlayFrequencyField.text
+						//frequency: overlayFrequencyField.text
 						treshold: overlayTresholdField.text
+						scale: cameraView.scaleFactor
+						transformOrigin: Item.TopLeft
 					}
 					
 					Item {
@@ -130,10 +141,11 @@ ColumnLayout {
 					}
 					
 					function set() {
-						x = cameraImage.selectionX;
-						y = cameraImage.selectionY;
-						width = cameraImage.selectionWidth;
-						height = cameraImage.selectionHeight;
+						visible = true;
+						dataX = cameraView.selectionX;
+						dataY = cameraView.selectionY;
+						dataWidth = cameraView.selectionWidth;
+						dataHeight = cameraView.selectionHeight;
 					}
 				}
 			}
@@ -142,12 +154,24 @@ ColumnLayout {
 		}
 		
 		ColumnLayout {
+			RowLayout {
+				Label {
+					text: "HPF cutoff (Hz)"
+				}
+				
+				TextField {
+					id: cutoffFrequencyField
+					validator: DoubleValidator {bottom: 0}
+					text: "50"
+				}
+			}
+			
 			CheckBox {
 				id: overlayCheckbox
-				text: "Frequency overlay"
-				checked: false
+				text: "Overlay"
+				checked: true
 			}
-			RowLayout {
+			/*RowLayout {
 				Label {
 					text: "frequency"
 				}
@@ -157,34 +181,81 @@ ColumnLayout {
 					validator: IntValidator {bottom: 0}
 					text: "1"
 				}
-			}
+			}*/
 			RowLayout {
 				Label{
-					text: "treshold"
+					text: "Treshold"
 				}
 				TextField {
 					id: overlayTresholdField
-					validator: IntValidator {bottom: 0}
+					validator: DoubleValidator {bottom: 0; locale: "en"}
 					text: "10"
 				}
 			}
 			
+			CheckBox {
+				id: fftCheckbox
+				text: "FFT"
+				checked: false
+			}
+			CheckBox {
+				id: hpfCheckbox
+				text: "HPF"
+				checked: true
+			}
+			
+			Button {
+				text: "Analyze"
+				enabled: cameraView.selectionWidth > 0 && cameraView.selectionHeight > 0 && 
+					navigator.selectionEnd > navigator.selectionStart
+				
+				onClicked: {
+					var x = cameraView.selectionX;
+					var y = cameraView.selectionY;
+					var width = cameraView.selectionWidth;
+					var height = cameraView.selectionHeight;
+					var tstart = navigator.selectionStart;
+					var twindow = navigator.selectionEnd - tstart;
+					main.hpAnalyzer.cutoff = cutoffFrequencyField.text;
+					if (hpfCheckbox.checked)
+						main.hpAnalyzer.analyze(x, y, tstart, width, height, twindow);
+					if (fftCheckbox.checked)
+						main.analyzer.analyze(x, y, tstart, width, height, twindow);
+						fourierImage.visible = true;
+					analyzedRegion.set();
+					analyzedInterval.set();
+					
+				}
+			}
+		}
+		
+		ColumnLayout {
 			SpectrumImage {
 				id:fourierImage
 				visible: false
-				width: 800
-				height: 600
+				width: 400
+				height: 300
 				analyzer: main.analyzer
-				targetX: cross.x
-				targetY: cross.y
+				valueCutoff: cutoffSlider.value
+				targetX: analyzedRegion.cursorX / cameraView.scaleFactor
+				targetY: analyzedRegion.cursorY / cameraView.scaleFactor
+			}
+			
+			Slider {
+				id: cutoffSlider
+				visible: fourierImage.visible
+				value: .25
+				minimumValue: 0.0001
 			}
 		}
 	}
 	
 	ColumnLayout {
 		id: navigator
+		Layout.fillWidth: true
+		
 		property int curFrame: 0
-		property int numFrames: main.analyzer.ready? main.analyzer.nFrames : 0
+		property int numFrames: main.measurementData.ready? main.measurementData.nFrames : 0
 		
 		property int selectionStart: 0
 		property int selectionEnd: 0
@@ -201,9 +272,19 @@ ColumnLayout {
 		Rectangle {
 			id: slider
 			Layout.minimumHeight: 50
-			Layout.minimumWidth: 1000
+			Layout.fillWidth: true
 			color: "white"
 			border.color: "black"
+			
+			MouseArea {
+				anchors.fill: parent
+				onWheel: navigator.setFrame(navigator.curFrame + (wheel.angleDelta.y > 0? 5 : -5))
+			}
+			
+			AnalogSignalPlot {
+				anchors.fill: parent
+				measurementData: main.measurementData
+			}
 			
 			Rectangle {
 				id: cursor
@@ -238,7 +319,8 @@ ColumnLayout {
 			}
 			
 			MouseArea {
-				anchors.fill: parent
+				width: parent.width-1
+				height: parent.height
 				acceptedButtons: Qt.LeftButton
 				
 				onPressed: navigator.curFrame = navigator.numFrames * mouse.x / slider.width
@@ -249,7 +331,8 @@ ColumnLayout {
 			}
 			
 			MouseArea {
-				anchors.fill: parent
+				width: parent.width-1
+				height: parent.height
 				acceptedButtons: Qt.RightButton
 				
 				onPressed: navigator.selectionStart = navigator.numFrames * mouse.x / slider.width
@@ -270,11 +353,6 @@ ColumnLayout {
 				text:navigator.curFrame
 				validator: IntValidator {bottom: 0; top:navigator.numFrames-1}
 				onEditingFinished: navigator.curFrame = text
-				
-				MouseArea {
-					anchors.fill: parent
-					onWheel: navigator.setFrame(navigator.curFrame + (wheel.angleDelta.y > 0? 5 : -5))
-				}
 			}
 			
 			Button {
