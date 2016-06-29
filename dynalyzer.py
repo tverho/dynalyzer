@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import pyplot
 import xml.etree.ElementTree as ET
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal, Qt
-from PyQt5.QtGui import QImage, QTransform, QColor
+from PyQt5.QtGui import QImage, QTransform, QColor, QPainter
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtQuick import QQuickImageProvider, QQuickPaintedItem
 from PyQt5.QtQml import qmlRegisterType
@@ -568,6 +568,68 @@ def create_colortable():
 		
 
 
+class VideoExporter(QObject):
+	
+	@pyqtSlot(BandPassAnalyzer, str, int)
+	def saveVideoFrames(self, analyzer, folder, skip):
+		snapshotView = SnapshotView()
+		overlay = BPFOverlayImage()
+		analogSignalPlot = AnalogSignalPlot()
+		data = analyzer.measurementData
+		snapshotView.measurementData = data
+		overlay.analyzer = analyzer
+		overlay.treshold = 1
+		analogSignalPlot.measurementData = data
+		
+		t0 = analyzer.t0
+		nframes = analyzer.analysis.shape[0] // skip
+		
+		width = data.image_width
+		snapshot_height = data.image_height
+		overlay_width = analyzer.analysis.shape[2]
+		overlay_height = analyzer.analysis.shape[1]
+		overlay_x = analyzer.x0
+		overlay_y = analyzer.y0
+		plot_height = 200
+		
+		analogSignalPlot.setWidth(width)
+		analogSignalPlot.setHeight(plot_height)
+		
+		height = snapshot_height + plot_height
+		
+		for i in range(nframes):
+			frame = t0 + i*skip
+			overlay.frame = frame
+			overlay.frame = frame
+			analogSignalPlot.frame = frame
+			
+			snapshot_img = data.getVideoSnapshot(frame)
+			
+			overlay_img = QImage(overlay_width, overlay_height, QImage.Format_ARGB32)
+			overlay_img.fill(0)
+			overlay_painter = QPainter(overlay_img)
+			overlay.paint(overlay_painter)
+			overlay_painter.end()
+			
+			plot_img = QImage(width, plot_height, QImage.Format_ARGB32)
+			plot_img.fill(0xffffffff)
+			plot_painter = QPainter(plot_img)
+			analogSignalPlot.paint(plot_painter)
+			plot_painter.end()
+			
+			image = QImage(width, height, QImage.Format_ARGB32)
+			painter = QPainter(image)
+			
+			painter.drawImage(0, 0, snapshot_img)
+			painter.drawImage(overlay_x, overlay_y, overlay_img)
+			painter.drawImage(0, snapshot_height, plot_img)
+			painter.end()
+			
+			print('saving frame', i)
+			image.save('{0}/frame{1:03d}.png'.format(folder, i))
+		
+		
+
 if __name__ == '__main__':
 	from PyQt5.QtQml import QQmlApplicationEngine
 	from PyQt5.QtGui import QGuiApplication
@@ -583,6 +645,7 @@ if __name__ == '__main__':
 	qmlRegisterType(BPFOverlayImage, "org.dynalyzer", 1, 0, "BPFOverlayImage");
 	qmlRegisterType(SpectrumImage, "org.dynalyzer", 1, 0, "SpectrumImage");
 	qmlRegisterType(AnalogSignalPlot, "org.dynalyzer", 1, 0, "AnalogSignalPlot");
+	qmlRegisterType(VideoExporter, "org.dynalyzer", 1, 0, "VideoExporter");
 		
 	engine = QQmlApplicationEngine()
 	engine.load('dynalyzer.qml')

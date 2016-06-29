@@ -227,6 +227,18 @@ ColumnLayout {
 					
 				}
 			}
+			
+			Button {
+				text: "Save video"
+				
+				onClicked: {
+					exporter.saveVideoFrames(main.hpAnalyzer, "/home/tuukka/tmp/dynamat_video", 10)
+				}
+				
+				VideoExporter {
+					id:exporter
+				}
+			}
 		}
 		
 		ColumnLayout {
