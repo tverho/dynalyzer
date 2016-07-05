@@ -357,7 +357,8 @@ class AnalysisVisualization(QQuickPaintedItem):
 	@analyzer.setter
 	def analyzer(self, val):
 		self._analyzer = val
-		self._analyzer.analysisComplete.connect(self.update)
+		if val:
+			self._analyzer.analysisComplete.connect(self.update)
 
 class OverlayImage(AnalysisVisualization):
 	def __init__(self, parent=None):
@@ -538,6 +539,7 @@ class AnalogSignalPlot(QQuickPaintedItem):
 		self._data = val
 	
 	def paint(self, painter):
+		if self._data is None: return
 		signals = self._data.analog_signals
 		width = self.width()
 		height = self.height()

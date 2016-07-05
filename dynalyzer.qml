@@ -13,36 +13,30 @@ ApplicationWindow {
 	height: 800
 	title: "Dynalyzer"
 	
-	TabView {
-		id: tabview
+	ColumnLayout {
 		anchors.fill: parent
-	
-		Tab {
-			id: tab
-			title: folder
-			property string folder: "/home/tuukka/measurement data/dynamat/20160305 Molmat/20160503_0425"
+		
+		Button {
+			text: "Open measurement"
 			
-			AnalysisView {
-				analyzer: analyzer
-				hpAnalyzer: hpAnalyzer
-				measurementData: data
-				
-				MeasurementData {
-					id: data
-					folder: tab.folder
-				}
-				
-				FourierAnalyzer {
-					id:analyzer
-					measurementData: data
-				}
-				
-				BandPassAnalyzer {
-					id: hpAnalyzer
-					measurementData: data
+			onClicked: dataPathDialog.open()
+			
+			FileDialog {
+				id: dataPathDialog
+				title: "Choose a folder"
+				selectFolder: true
+				onAccepted: {
+					var component = Qt.createComponent("AnalysisView.qml");
+					var tab = tabview.addTab(folder);
+					component.createObject(tab, {"folder": folder});
+ 					
 				}
 			}
-			
+		}
+	
+		TabView {
+			id: tabview
+			Layout.fillHeight: true
 			
 		}
 	}

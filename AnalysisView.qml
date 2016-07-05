@@ -7,26 +7,9 @@ import org.dynalyzer 1.0
 
 ColumnLayout {
 	id: main
-	property MeasurementData measurementData
-	property BandPassAnalyzer hpAnalyzer
-	property FourierAnalyzer analyzer
-	
-	RowLayout {
-		Button {
-			text: "Browse"
-			onClicked: dataPathDialog.open()
-			
-			FileDialog {
-				id: dataPathDialog
-				title: "Choose a folder"
-				selectFolder: true
-				onAccepted: main.analyzer.folder = folder;
-			}
-		}
+	property string folder
+	anchors.fill: parent
 		
-		
-	}
-	
 	RowLayout {
 		ColumnLayout {
 			Rectangle {
@@ -44,7 +27,7 @@ ColumnLayout {
 				
 				SnapshotView {
 					anchors.fill: parent
-					measurementData: main.measurementData
+					measurementData: measurementData
 					frame: parent.frame
 					scale: parent.scaleFactor
 					transformOrigin: Item.TopLeft
@@ -99,7 +82,7 @@ ColumnLayout {
 						id: overlayImage
 						visible: overlayCheckbox.checked
 						anchors.fill: parent
-						analyzer: main.hpAnalyzer
+						analyzer: bpAnalyzer
 						frame: navigator.curFrame
 						//frequency: overlayFrequencyField.text
 						treshold: overlayTresholdField.text
@@ -247,7 +230,7 @@ ColumnLayout {
 				visible: false
 				width: 400
 				height: 300
-				analyzer: main.analyzer
+				analyzer: fourierAnalyzer
 				valueCutoff: cutoffSlider.value
 				targetX: analyzedRegion.cursorX / cameraView.scaleFactor
 				targetY: analyzedRegion.cursorY / cameraView.scaleFactor
@@ -267,7 +250,7 @@ ColumnLayout {
 		Layout.fillWidth: true
 		
 		property int curFrame: 0
-		property int numFrames: main.measurementData.ready? main.measurementData.nFrames : 0
+		property int numFrames: measurementData && measurementData.ready? measurementData.nFrames : 0
 		
 		property int selectionStart: 0
 		property int selectionEnd: 0
@@ -295,7 +278,7 @@ ColumnLayout {
 			
 			AnalogSignalPlot {
 				anchors.fill: parent
-				measurementData: main.measurementData
+				measurementData: measurementData
 			}
 			
 			Rectangle {
@@ -372,5 +355,20 @@ ColumnLayout {
 				onClicked: navigator.setFrame(navigator.curFrame+1)
 			}
 		}
+	}
+	
+	FourierAnalyzer {
+		id: fourierAnalyzer
+		measurementData: measurementData
+	}
+	
+	BandPassAnalyzer {
+		id: bpAnalyzer
+		measurementData: measurementData
+	}
+	
+	MeasurementData {
+		id: measurementData
+		folder: main.folder
 	}
 }
