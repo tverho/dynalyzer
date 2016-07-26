@@ -1,5 +1,5 @@
 import numpy as np
-from matplotlib import pyplot
+#from matplotlib import pyplot
 import xml.etree.ElementTree as ET
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal, Qt
 from PyQt5.QtGui import QImage, QTransform, QColor, QPainter
@@ -160,7 +160,7 @@ class MeasurementData(QObject):
 	
 	@folder.setter
 	def folder(self, folder):
-		folder = folder.strip('file:')
+		folder = folder.strip('file://')
 		self.data_folder = folder
 		configpath = folder + '/config.txt'
 		self.config = parse_config(configpath)

@@ -37,6 +37,7 @@ ApplicationWindow {
 		TabView {
 			id: tabview
 			Layout.fillHeight: true
+			Layout.fillWidth: true
 			
 		}
 	}

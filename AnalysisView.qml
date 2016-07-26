@@ -199,11 +199,11 @@ ColumnLayout {
 					var height = cameraView.selectionHeight;
 					var tstart = navigator.selectionStart;
 					var twindow = navigator.selectionEnd - tstart;
-					main.hpAnalyzer.cutoff = cutoffFrequencyField.text;
+					bpAnalyzer.cutoff = cutoffFrequencyField.text;
 					if (hpfCheckbox.checked)
-						main.hpAnalyzer.analyze(x, y, tstart, width, height, twindow);
+						bpAnalyzer.analyze(x, y, tstart, width, height, twindow);
 					if (fftCheckbox.checked)
-						main.analyzer.analyze(x, y, tstart, width, height, twindow);
+						fourierAnalyzer.analyze(x, y, tstart, width, height, twindow);
 						fourierImage.visible = true;
 					analyzedRegion.set();
 					analyzedInterval.set();
