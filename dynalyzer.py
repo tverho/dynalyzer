@@ -1,4 +1,5 @@
 import numpy as np
+import os
 #from matplotlib import pyplot
 import xml.etree.ElementTree as ET
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal, Qt
@@ -28,6 +29,15 @@ def parse_config(filename, rotate=True):
 	config.analog_samplerate = float( root.find(".//*[Name='Sample Rate (S/s)']/Val").text )
 	
 	return config
+
+def get_video_filenames(folder):
+	files = os.listdir(folder)
+	if 'Camera_Data.sav' in files:
+		return ['Camera_Data.sav']
+
+	result = [file for file in files if file.count('Camera_Data') > 0]
+	result.sort()
+	return result
 
 def get_video_nframes(filename):
 	infile = open(filename)
@@ -164,7 +174,7 @@ class MeasurementData(QObject):
 		self.data_folder = folder
 		configpath = folder + '/config.txt'
 		self.config = parse_config(configpath)
-		self.video_path = self.data_folder + '/Camera_Data.sav'
+		self.video_path = self.data_folder +'/'+ get_video_filenames(folder)[0]
 		analog_data_path = self.data_folder + '/Analog_Data.sav'
 		nframes = get_video_nframes(self.video_path)
 		self.config.nframes = nframes
@@ -212,8 +222,8 @@ class FourierAnalyzer(QObject):
 		self.y0 = None
 		self.frequencies = None
 		self.max_value = None
-		self.analysis_window = 50
-		self.analysis_step = 30
+		self.analysis_window = 1000
+		self.analysis_step = 500
 	
 	@pyqtProperty(MeasurementData)
 	def measurementData(self):
@@ -549,7 +559,7 @@ class AnalogSignalPlot(QQuickPaintedItem):
 		
 		y = np.abs(signals[0,:nsamples])
 		y -= np.min(y)
-		y /= np.max(y[100:])
+		y /= np.max(y[1:])
 		y = 1 - .9*y
 		y *= height
 		

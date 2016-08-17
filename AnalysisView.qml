@@ -15,7 +15,7 @@ ColumnLayout {
 			Rectangle {
 				id: cameraView
 				Layout.fillHeight: true
-				Layout.minimumWidth: 400
+				Layout.minimumWidth: 600
  				color: "transparent"
 				property int frame: navigator.curFrame
 				property real scaleFactor: Math.min(width/measurementData.image_width, height/measurementData.image_height)
