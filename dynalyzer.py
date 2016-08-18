@@ -2,7 +2,7 @@ import numpy as np
 import os
 #from matplotlib import pyplot
 import xml.etree.ElementTree as ET
-from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal, Qt
+from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal, Qt, QUrl
 from PyQt5.QtGui import QImage, QTransform, QColor, QPainter
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtQuick import QQuickImageProvider, QQuickPaintedItem
@@ -60,10 +60,11 @@ def read_frame(filename, image_width, image_height, frameindex, rotate=True):
 	# shuffle bytes to the right order
 	datastr = int64_data.astype('<i8').tobytes()
 	if rotate:
-		bytearr = np.fromstring(datastr, dtype='uint8').reshape([image_width, image_height])
-		return np.fliplr(bytearr.transpose()).tobytes()
+		result = np.fromstring(datastr, dtype='uint8').reshape([image_width, image_height])
+		result = np.fliplr(result.transpose())
 	else:
-		return datastr
+		result = np.fromstring(datastr, dtype='uint8').reshape([image_height, image_width])
+	return result
 	
 
 def read_section(filename, xstart, ystart, tstart, xwindow, ywindow, twindow, image_width, image_height, rotate=True):
@@ -96,7 +97,7 @@ def read_section(filename, xstart, ystart, tstart, xwindow, ywindow, twindow, im
 	
 	if rotate:
 		result = np.fliplr(result).transpose([0, 2, 1]) # why in this order :P ??
-	
+		
 	return result
 	
 
@@ -123,13 +124,6 @@ def spectrogram(section, nperseg, step, framerate=1):
 	freqs = np.fft.fftfreq(nperseg, 1/framerate)
 	
 	return result, freqs
-
-def high_pass_filter(section, framerate, f):
-	nyq_freq = framerate / 2
-	numtaps = 65
-	
-	coeffs = signal.firwin(numtaps, np.array(f)/nyq_freq, pass_zero=False)
-	return signal.lfilter(coeffs, 1, section, axis=0)
 	
 
 def read_analog_data(filename):
@@ -170,7 +164,7 @@ class MeasurementData(QObject):
 	
 	@folder.setter
 	def folder(self, folder):
-		folder = folder.strip('file://')
+		folder = QUrl(folder).toLocalFile()
 		self.data_folder = folder
 		configpath = folder + '/config.txt'
 		self.config = parse_config(configpath)
@@ -204,8 +198,8 @@ class MeasurementData(QObject):
 	def getVideoSnapshot(self, frameindex):
 		config = self.config
 		imgdata = read_frame(self.video_path, config.image_width, config.image_height, frameindex)
-		img = QImage(imgdata, config.image_width, config.image_height, QImage.Format_Grayscale8)
-		return img
+		qimg = to_aligned_qimage(imgdata, QImage.Format_Grayscale8)
+		return qimg
 
 
 class FourierAnalyzer(QObject):
@@ -222,8 +216,8 @@ class FourierAnalyzer(QObject):
 		self.y0 = None
 		self.frequencies = None
 		self.max_value = None
-		self.analysis_window = 1000
-		self.analysis_step = 500
+		self.analysis_window = 200
+		self.analysis_step = 100
 	
 	@pyqtProperty(MeasurementData)
 	def measurementData(self):
@@ -274,15 +268,24 @@ class BandPassAnalyzer(QObject):
 		self.t0 = None
 		self.x0 = None
 		self.y0 = None
-		self._cutoff = 0
+		self._lower_limit = 0
+		self._upper_limit = None
+		self._remove_baseline = True
 	
 	@pyqtProperty(float)
-	def cutoff(self):
-		return self._cutoff
-	@cutoff.setter
-	def cutoff(self, val):
-		self._cutoff = val
-		
+	def lowerLimit(self):
+		return self._lower_limit
+	@lowerLimit.setter
+	def lowerLimit(self, val):
+		self._lower_limit = val
+	
+	@pyqtProperty(float)
+	def upperLimit(self):
+		return self._upper_limit
+	@upperLimit.setter
+	def upperLimit(self, val):
+		self._upper_limit = val
+	
 	@pyqtProperty(MeasurementData)
 	def measurementData(self):
 		return self._data
@@ -297,33 +300,43 @@ class BandPassAnalyzer(QObject):
 		framerate = self._data.framerate
 		nyq_freq = framerate/2
 		
-		black_treshold = 40
 		uint8_data = read_section(self._data.video_path, x, y, t, width, height, duration, img_width, img_height)
+		
+		black_treshold = 20
 		zeros = np.where(uint8_data < black_treshold)
 		
-		numtaps, beta = signal.kaiserord(30, self.cutoff/2/nyq_freq)
-		coeffs = signal.firwin(numtaps, 5/nyq_freq, window=('kaiser', beta))
-		baseline = signal.lfilter(coeffs, 1.0, uint8_data, axis=0)
+		if self._remove_baseline:
+			# Running mean
+			f = self._lower_limit / 2
+			N = int(framerate / f)
+			baseline = np.zeros(uint8_data.shape, dtype='float32')
+			cumsum = np.cumsum(uint8_data, axis=0)
+			baseline[N:,:,:] = cumsum[N:,:,:] - cumsum[:-N,:,:]
+			baseline /= N
+			baseline[:N,:,:] = np.mean(uint8_data[:N,:,:], axis=0)
+		else:
+			baseline = np.mean(uint8_data)
 		
-		section = 100 * (uint8_data / baseline - 1)
-		
+		section = np.zeros(uint8_data.shape, dtype='float32')
+		section[:,:,:] = 100 * (uint8_data / baseline - 1)
 		del baseline
 		del uint8_data
 		
 		numtaps = 65
-		freqs = [self._cutoff, self._cutoff*2]
+		freqs = [self._lower_limit, self._upper_limit]
+		if freqs[1] > nyq_freq: 
+			print(freqs[1], ' too hight, using nyq_freq =', nyq_freq)
+			freqs[1] = nyq_freq-1
 		coeffs = signal.firwin(numtaps, freqs, nyq=nyq_freq, pass_zero=False)
 		analysis = signal.lfilter(coeffs, 1, section, axis=0)
 		
-		#analysis = high_pass_filter(section, framerate, [self._cutoff, self._cutoff*2])**2
 		analysis[zeros] = 0
-		
-		self.analysisComplete.emit()
 		
 		self.analysis = analysis
 		self.t0 = t
 		self.x0 = x
 		self.y0 = y
+		self.analysisComplete.emit()
 		
 
 class SnapshotView(QQuickPaintedItem):
@@ -446,7 +459,7 @@ class BPFOverlayImage(AnalysisVisualization):
 		t = self.frame - self.analyzer.t0
 		if t < 0 or t >= self.analyzer.analysis.shape[0]: return 
 	
-		data = self.analyzer.analysis[t, :, :] > self.treshold
+		data = np.abs(self.analyzer.analysis[t, :, :]) > self.treshold
 
 		imagearr = np.zeros((data.shape[0], data.shape[1], 4), dtype="uint8")
 		imagearr[:,:, 3] = data*255
@@ -523,13 +536,7 @@ class SpectrumImage(AnalysisVisualization):
 		max_value = self.analyzer.max_value*self._cutoff**2
 		normalized = 256 * (data/max_value)**0.5
 		
-		# Lines should be 32 bit aligned
-		imagearr = np.zeros((normalized.shape[0], (normalized.shape[1]+3)//4 * 4))
-		imagearr[:,0:normalized.shape[1]] = normalized
-		
-		imagestr = np.uint8(imagearr.flatten()).tobytes()
-		image_height, image_width = data.shape
-		qimg = QImage(imagestr, image_width, image_height, QImage.Format_Indexed8)
+		qimg = to_aligned_qimage(normalized, QImage.Format_Indexed8)
 		ct = create_colortable()
 		qimg.setColorTable(ct)
 		qimg = qimg.mirrored().scaled(self.width(), self.height(), transformMode=Qt.SmoothTransformation)
@@ -578,6 +585,14 @@ def create_colortable():
 		table.append( QColor.fromHsl(h, s, l).rgb() )
 	return table
 		
+
+def to_aligned_qimage(imgarr, format):
+	aligned = np.zeros((imgarr.shape[0], (imgarr.shape[1]+3)//4 * 4), dtype='uint8')
+	aligned[:,0:imgarr.shape[1]] = imgarr
+		
+	image_height, image_width = imgarr.shape
+	qimg = QImage(aligned.tobytes(), image_width, image_height, format)
+	return qimg
 
 
 class VideoExporter(QObject):

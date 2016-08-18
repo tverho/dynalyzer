@@ -85,7 +85,7 @@ ColumnLayout {
 						analyzer: bpAnalyzer
 						frame: navigator.curFrame
 						//frequency: overlayFrequencyField.text
-						treshold: overlayTresholdField.text
+						treshold: overlayTresholdField.text != ""? overlayTresholdField.text : 999999
 						scale: cameraView.scaleFactor
 						transformOrigin: Item.TopLeft
 					}
@@ -139,13 +139,23 @@ ColumnLayout {
 		ColumnLayout {
 			RowLayout {
 				Label {
-					text: "HPF cutoff (Hz)"
+					text: "BPF low (Hz)"
 				}
 				
 				TextField {
-					id: cutoffFrequencyField
-					validator: DoubleValidator {bottom: 0}
+					id: bpfLowFrequencyField
+					validator: DoubleValidator {bottom: 0; locale: "en"}
 					text: "50"
+				}
+				
+				Label {
+					text: "BPF high (Hz)"
+				}
+				
+				TextField {
+					id: bpfHighFrequencyField
+					validator: DoubleValidator {bottom: 0; locale: "en"}
+					text: "100"
 				}
 			}
 			
@@ -199,7 +209,8 @@ ColumnLayout {
 					var height = cameraView.selectionHeight;
 					var tstart = navigator.selectionStart;
 					var twindow = navigator.selectionEnd - tstart;
-					bpAnalyzer.cutoff = cutoffFrequencyField.text;
+					bpAnalyzer.lowerLimit = bpfLowFrequencyField.text;
+					bpAnalyzer.upperLimit = bpfHighFrequencyField.text;
 					if (hpfCheckbox.checked)
 						bpAnalyzer.analyze(x, y, tstart, width, height, twindow);
 					if (fftCheckbox.checked)
