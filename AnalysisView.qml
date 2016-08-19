@@ -192,8 +192,8 @@ ColumnLayout {
 				checked: false
 			}
 			CheckBox {
-				id: hpfCheckbox
-				text: "HPF"
+				id: bpfCheckbox
+				text: "BPF"
 				checked: true
 			}
 			
@@ -211,7 +211,7 @@ ColumnLayout {
 					var twindow = navigator.selectionEnd - tstart;
 					bpAnalyzer.lowerLimit = bpfLowFrequencyField.text;
 					bpAnalyzer.upperLimit = bpfHighFrequencyField.text;
-					if (hpfCheckbox.checked)
+					if (bpfCheckbox.checked)
 						bpAnalyzer.analyze(x, y, tstart, width, height, twindow);
 					if (fftCheckbox.checked)
 						fourierAnalyzer.analyze(x, y, tstart, width, height, twindow);

@@ -7,7 +7,7 @@ from PyQt5.QtGui import QImage, QTransform, QColor, QPainter
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtQuick import QQuickImageProvider, QQuickPaintedItem
 from PyQt5.QtQml import qmlRegisterType
-from scipy import signal
+from scipy import signal, ndimage
 
 def parse_config(filename, rotate=True):
 	tree = ET.parse(filename)
@@ -271,6 +271,7 @@ class BandPassAnalyzer(QObject):
 		self._lower_limit = 0
 		self._upper_limit = None
 		self._remove_baseline = True
+		self._temporal_averaging = 10
 	
 	@pyqtProperty(float)
 	def lowerLimit(self):
@@ -302,7 +303,7 @@ class BandPassAnalyzer(QObject):
 		
 		uint8_data = read_section(self._data.video_path, x, y, t, width, height, duration, img_width, img_height)
 		
-		black_treshold = 20
+		black_treshold = 40
 		zeros = np.where(uint8_data < black_treshold)
 		
 		if self._remove_baseline:
@@ -311,9 +312,9 @@ class BandPassAnalyzer(QObject):
 			N = int(framerate / f)
 			baseline = np.zeros(uint8_data.shape, dtype='float32')
 			cumsum = np.cumsum(uint8_data, axis=0)
-			baseline[N:,:,:] = cumsum[N:,:,:] - cumsum[:-N,:,:]
-			baseline /= N
+			baseline[N:,:,:] = (cumsum[N:,:,:] - cumsum[:-N,:,:]) / N
 			baseline[:N,:,:] = np.mean(uint8_data[:N,:,:], axis=0)
+			del cumsum
 		else:
 			baseline = np.mean(uint8_data)
 		
@@ -324,14 +325,20 @@ class BandPassAnalyzer(QObject):
 		
 		numtaps = 65
 		freqs = [self._lower_limit, self._upper_limit]
-		if freqs[1] > nyq_freq: 
-			print(freqs[1], ' too hight, using nyq_freq =', nyq_freq)
-			freqs[1] = nyq_freq-1
+		if freqs[1] > nyq_freq:
+			freqs = [freqs[0]]
 		coeffs = signal.firwin(numtaps, freqs, nyq=nyq_freq, pass_zero=False)
 		analysis = signal.lfilter(coeffs, 1, section, axis=0)
 		
 		analysis[zeros] = 0
 		
+		del section
+		analysis = np.abs(analysis)
+		if self._temporal_averaging:
+			N = self._temporal_averaging
+			b = np.ones(N) / N
+			analysis = signal.lfilter(b, 1, analysis, axis=0)
+					
 		self.analysis = analysis
 		self.t0 = t
 		self.x0 = x
@@ -436,6 +443,7 @@ class BPFOverlayImage(AnalysisVisualization):
 		AnalysisVisualization.__init__(self, parent)
 		self._frame = 0
 		self._overlay_treshold = 0
+		self._smooth_radius = 1.5
 
 	@pyqtProperty(int)
 	def frame(self):
@@ -459,7 +467,11 @@ class BPFOverlayImage(AnalysisVisualization):
 		t = self.frame - self.analyzer.t0
 		if t < 0 or t >= self.analyzer.analysis.shape[0]: return 
 	
-		data = np.abs(self.analyzer.analysis[t, :, :]) > self.treshold
+		frame = np.abs(self.analyzer.analysis[t, :, :])
+		if self._smooth_radius:
+			frame = ndimage.gaussian_filter(frame, self._smooth_radius)
+	
+		data = frame > self.treshold
 
 		imagearr = np.zeros((data.shape[0], data.shape[1], 4), dtype="uint8")
 		imagearr[:,:, 3] = data*255
@@ -555,6 +567,7 @@ class AnalogSignalPlot(QQuickPaintedItem):
 	def measurementData(self, val):
 		self._data = val
 	
+	
 	def paint(self, painter):
 		if self._data is None: return
 		signals = self._data.analog_signals
@@ -564,9 +577,14 @@ class AnalogSignalPlot(QQuickPaintedItem):
 		duration = self._data.nFrames/self._data.framerate
 		nsamples = int(duration*self._data.config.analog_samplerate)
 		
+		
 		y = np.abs(signals[0,:nsamples])
 		y -= np.min(y)
-		y /= np.max(y[1:])
+		
+		beginning = np.where(np.diff(y) > 0)[0][0] + 1
+		y[:beginning] = 0
+		
+		y /= np.max(y)
 		y = 1 - .9*y
 		y *= height
 		
