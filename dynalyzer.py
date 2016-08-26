@@ -1,6 +1,6 @@
 import numpy as np
 import os
-#from matplotlib import pyplot
+from matplotlib import pyplot
 import xml.etree.ElementTree as ET
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal, Qt, QUrl
 from PyQt5.QtGui import QImage, QTransform, QColor, QPainter
@@ -296,6 +296,7 @@ class BandPassAnalyzer(QObject):
 		
 	@pyqtSlot(int, int, int, int, int, int)
 	def analyze(self, x, y, t, width, height, duration):
+		del self.analysis
 		img_width = self._data.image_width
 		img_height = self._data.image_height
 		framerate = self._data.framerate
@@ -335,7 +336,8 @@ class BandPassAnalyzer(QObject):
 		del section
 		analysis = np.abs(analysis)
 		if self._temporal_averaging:
-			N = self._temporal_averaging
+			#N = self._temporal_averaging
+			N = framerate / (self._lower_limit + self._upper_limit)
 			b = np.ones(N) / N
 			analysis = signal.lfilter(b, 1, analysis, axis=0)
 					
@@ -471,13 +473,17 @@ class BPFOverlayImage(AnalysisVisualization):
 		if self._smooth_radius:
 			frame = ndimage.gaussian_filter(frame, self._smooth_radius)
 	
-		data = frame > self.treshold
+		imagearr = np.zeros((frame.shape[0], frame.shape[1], 4), dtype="uint8")
 
-		imagearr = np.zeros((data.shape[0], data.shape[1], 4), dtype="uint8")
-		imagearr[:,:, 3] = data*255
-		imagearr[:,:, 0] = 255
+		for i in range(5):
+			treshold = self.treshold * (1 + i*0.5)
+			pixels = np.where(frame > treshold)
+			imagearr[:,:,0][pixels] = (255 - i*40)
+			if i==0: 
+				imagearr[:,:,3][pixels] = 255
+
 		imagestr = imagearr.flatten().tobytes()
-		image_height, image_width = data.shape
+		image_height, image_width = frame.shape
 		qimg = QImage(imagestr, image_width, image_height, QImage.Format_ARGB32)
 		painter.drawImage(0, 0, qimg)
 
@@ -567,7 +573,6 @@ class AnalogSignalPlot(QQuickPaintedItem):
 	def measurementData(self, val):
 		self._data = val
 	
-	
 	def paint(self, painter):
 		if self._data is None: return
 		signals = self._data.analog_signals
@@ -576,19 +581,14 @@ class AnalogSignalPlot(QQuickPaintedItem):
 		
 		duration = self._data.nFrames/self._data.framerate
 		nsamples = int(duration*self._data.config.analog_samplerate)
-		
-		
-		y = np.abs(signals[0,:nsamples])
+
+		y = -signals[0,:nsamples]
 		y -= np.min(y)
-		
-		beginning = np.where(np.diff(y) > 0)[0][0] + 1
-		y[:beginning] = 0
-		
-		y /= np.max(y)
-		y = 1 - .9*y
+
+		y /= np.max(y[len(y)//4:])
 		y *= height
 		
-		x = np.round(np.linspace(0, width, len(y)))
+		x = np.linspace(0, width, len(y))
 		
 		for i in range(y.shape[0]-1):
 			painter.drawLine(x[i], y[i], x[i+1], y[i+1])
@@ -671,9 +671,7 @@ class VideoExporter(QObject):
 			painter.end()
 			
 			print('saving frame', i)
-			image.save('{0}/frame{1:03d}.png'.format(folder, i))
-		
-		
+			image.save('{0}/frame{1:03d}.png'.format(folder, i))	
 
 if __name__ == '__main__':
 	from PyQt5.QtQml import QQmlApplicationEngine

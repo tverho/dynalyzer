@@ -145,7 +145,7 @@ ColumnLayout {
 				TextField {
 					id: bpfLowFrequencyField
 					validator: DoubleValidator {bottom: 0; locale: "en"}
-					text: "50"
+					text: "10"
 				}
 				
 				Label {
@@ -155,7 +155,7 @@ ColumnLayout {
 				TextField {
 					id: bpfHighFrequencyField
 					validator: DoubleValidator {bottom: 0; locale: "en"}
-					text: "100"
+					text: "11"
 				}
 			}
 			
@@ -220,6 +220,24 @@ ColumnLayout {
 					analyzedInterval.set();
 					
 				}
+			}
+
+			Button {
+				text: "Save image"
+
+				onClicked: saveImageDialog.open()
+
+				FileDialog {
+						id: saveImageDialog
+						title: "Save image"
+						nameFilters: [ "Image files (*.jpg *.png)", "All files (*)" ]
+						selectExisting: false
+						onAccepted: {
+							cameraView.grabToImage(function(image) {
+								console.log(image.saveToFile("snapshot.png"));
+							});
+						}
+					}
 			}
 			
 			Button {
