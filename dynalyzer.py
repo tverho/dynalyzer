@@ -9,6 +9,70 @@ from PyQt5.QtQuick import QQuickImageProvider, QQuickPaintedItem
 from PyQt5.QtQml import qmlRegisterType
 from scipy import signal, ndimage
 
+class VideoRawData:
+	def __init__(self, folder, config, rotate = True):
+		filenames = get_video_filenames(folder)
+		w, h = config.image_width, config,image_height
+		
+		self.arrays = [create_view(f, w, h, rotate) for f in filenames]
+		self.shape = self.arrays[0].shape
+		self.shape[0] = sum(a.shape[0] for a in self.arrays)
+		
+	def create_view(filename, width, height, rotate):
+		header_size = 8
+		m = np.memmap(filename, dtype='u1', offset=header_size)
+		framesize = width*height
+		nframes = (len(m)+header_size) / (framesize+header_size)
+		
+		# Each 8 byte sequence is in reversed order, so create a 4d
+		# array and reverse the last axis to get the bytes in order
+		shape = [nframes, height, width//8, 8]
+		
+		# Use stride tricks to skip the header bytes between frames
+		strides = ((framesize+header_size), width, 8, 1)
+		strided = np.stride_tricks.as_strided(m, strides=strides, shape=shape)
+		
+		# Create the correct 3d layout
+		final_shape = [nframes, height, width]
+		view = strided[:,:,:,::-1].reshape(final_shape)
+		
+		if rotate:
+			view = view.transpose((0,2,1))
+		return view
+	
+	def __getitem__(self, slices):
+		frames = slices[0]
+		try:
+			start = frames.start
+			end = frames.end
+		except ItemError:
+			start = frames
+			end = frames+1
+			
+		if start is None: start = 0
+		if end is None: end = self.shape[0]
+		
+		rect = slices[1:]
+		partial = None
+		for arr in self.arrays:
+			if partial is not None:
+				if end > arr.shape[0]:
+					partial = np.vstack((partial, arr[:][rect]))
+				else:
+					return np.vstack((partial, arr[:end][rect]))
+			
+			elif end <= arr.shape[0]:
+				section = arr[start:end][rect]
+				return section 
+			
+			elif start < arr.shape[0]:
+				partial = arr[start:][rect]
+					
+			start -= arr.shape[0]
+			end -= arr.shape[0]
+		
+		raise Exception('Invalid slice: {}'.format(slices))
+
 def parse_config(filename, rotate=True):
 	tree = ET.parse(filename)
 	root = tree.getroot()
@@ -18,12 +82,8 @@ def parse_config(filename, rotate=True):
 	
 	width = int( root.find(".//*[Name='Image Width']/Val").text )
 	height = int( root.find(".//*[Name='Image Height']/Val").text )
-	if rotate:
-		config.image_width = height
-		config.image_height = width
-	else:
-		config.image_width = width
-		config.image_height = height
+	config.image_width = width
+	config.image_height = height
 	#nframes = int( root.find(".//*[Name='Frames to read']/Val").text )
 	config.framerate = float( root.find(".//*[Name='Frames per second']/Val").text )
 	config.analog_samplerate = float( root.find(".//*[Name='Sample Rate (S/s)']/Val").text )
