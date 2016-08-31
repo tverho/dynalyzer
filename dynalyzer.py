@@ -14,69 +14,82 @@ class VideoRawData:
 		filenames = get_video_filenames(folder)
 		w, h = config.image_width, config.image_height
 		
-		self.arrays = [create_view(f, w, h, rotate) for f in filenames]
-		self.shape = self.arrays[0].shape
-		self.shape[0] = sum(a.shape[0] for a in self.arrays)
+		self.arrays = [self.create_view(f, w, h) for f in filenames]
+		total_nframes = sum(a.shape[0] for a in self.arrays)
+		if rotate:
+			self.shape = (total_nframes, w, h)
+		else:
+			self.shape = (total_nframes, h, w)
+		self.rotate = rotate
 		
-	def create_view(filename, width, height, rotate):
-		header_size = 8
+	def create_view(self, filename, width, height):
+		header_size = 4
 		m = np.memmap(filename, dtype='u1', offset=header_size)
 		framesize = width*height
-		nframes = (len(m)+header_size) / (framesize+header_size)
+		filesize = len(m) + header_size
+		nframes = filesize // (framesize+header_size)
 		
 		# Each 8 byte sequence is in reversed order, so create a 4d
 		# array and reverse the last axis to get the bytes in order
-		shape = [nframes, height, width//8, 8]
+		shape = (nframes, height, width//8, 8)
 		
 		# Use stride tricks to skip the header bytes between frames
 		strides = ((framesize+header_size), width, 8, 1)
-		strided = np.stride_tricks.as_strided(m, strides=strides, shape=shape)
-		
-		# Create the correct 3d layout
-		final_shape = [nframes, height, width]
-		view = strided[:,:,:,::-1].reshape(final_shape)
-		
-		if rotate:
-			view = view.transpose((0,2,1))
+		strided = np.lib.stride_tricks.as_strided(m, strides=strides, shape=shape)
+		view = strided[:,:,:,::-1]
 		return view
 	
+	
 	def __getitem__(self, slices):
-		try:
-			frames = slices[0]
-			rect = slices[1:]
-		except TypeError:
-			frames = slices
-			rect = slice(None)
-		try:
-			start = frames.start
-			end = frames.end
-		except ItemError:
-			start = frames
-			end = frames+1
-			
-		if start is None: start = 0
-		if end is None: end = self.shape[0]
+		clean_slices = []
+		unpack_indices = [slice(None), slice(None), slice(None)]
+		for i in range(3):
+			try:
+				start, end, stride = slices[i].indices(self.shape[i])
+			except IndexError:
+				start, end = 0, self.shape[i]
+			except AttributeError:
+				start, end = slices[i], slices[i]+1
+				unpack_indices[i] = 0 # This is an integer index
+			clean_slices.append(slice(start, end))
 		
+		array = self.get_section(*clean_slices)
+		return array[unpack_indices]
 		
-		partial = None
+	def get_section(self, tslice, yslice, xslice):
+		start, end = tslice.start, tslice.stop
+		
+		if self.rotate:
+			range1, range2 = xslice, yslice
+		else:
+			range1, range2 = yslice, xslice
+		
+		rect = (slice(None), range1, slice(range2.start // 8, range2.stop // 8))
+		section = None
 		for arr in self.arrays:
-			if partial is not None:
+			if section is not None:
 				if end > arr.shape[0]:
-					partial = np.vstack((partial, arr[:][rect]))
+					section = np.vstack((partial, arr[:][rect]))
 				else:
-					return np.vstack((partial, arr[:end][rect]))
+					section = np.vstack((partial, arr[:end][rect]))
+					break
 			
 			elif end <= arr.shape[0]:
 				section = arr[start:end][rect]
-				return section 
+				break
 			
 			elif start < arr.shape[0]:
-				partial = arr[start:][rect]
+				section = arr[start:][rect]
 					
 			start -= arr.shape[0]
 			end -= arr.shape[0]
 		
-		raise Exception('Invalid slice: {}'.format(slices))
+		section = section.reshape((section.shape[0], section.shape[1], section.shape[2]*section.shape[3]))
+		if self.rotate:
+			section = np.fliplr(section).transpose((0, 2, 1))
+		
+		return section
+
 
 def parse_config(filename, rotate=True):
 	tree = ET.parse(filename)
@@ -97,74 +110,10 @@ def parse_config(filename, rotate=True):
 
 def get_video_filenames(folder):
 	files = os.listdir(folder)
-	if 'Camera_Data.sav' in files:
-		return ['Camera_Data.sav']
-
 	result = [os.path.join(folder, file) for file in files if file.count('Camera_Data') > 0]
 	result.sort()
 	return result
 
-def get_video_nframes(filename):
-	infile = open(filename)
-	header = np.fromfile(infile, dtype='>H', count=2)
-	framesize = header[1]*8 + 4
-	
-	infile.seek(0, 2)
-	end = infile.tell()
-	infile.close()
-	return end // framesize
-
-def read_frame(filename, image_width, image_height, frameindex, rotate=True):
-	infile = open(filename)
-	infile.seek(frameindex*(image_width*image_height+4) + 4)
-	
-	int64_data = np.fromfile(infile, dtype='>i8', count=image_height*image_width//8)
-	infile.close()
-	
-	# data byte order in file: 7 6 5 4 3 2 1 0 15 14 13 12 11 10 9 8 23 22 ...
-	# shuffle bytes to the right order
-	datastr = int64_data.astype('<i8').tobytes()
-	if rotate:
-		result = np.fromstring(datastr, dtype='uint8').reshape([image_width, image_height])
-		result = np.fliplr(result.transpose())
-	else:
-		result = np.fromstring(datastr, dtype='uint8').reshape([image_height, image_width])
-	return result
-	
-
-def read_section(filename, xstart, ystart, tstart, xwindow, ywindow, twindow, image_width, image_height, rotate=True):
-	if rotate:
-		xstart, ystart = (ystart, image_width - xstart - xwindow)
-		xwindow, ywindow = ywindow, xwindow
-		image_width, image_height = image_height, image_width
-		
-	xstart -= xstart%8
-	xwindow -= xwindow%8
-	
-	infile = open(filename)
-	# 4 header bytes in each frame
-	header = np.fromfile(infile, dtype='>H', count=2)
-	
-	int64_data = np.zeros([twindow, ywindow, xwindow//8], dtype='>i8')
-	
-	for t in range(twindow):
-		infile.seek(4 + (tstart+t) * (image_width*image_height + 4) + ystart*image_width)
-		datablock = np.fromfile(infile, dtype='>i8', count=ywindow*image_width//8)
-		datablock = datablock.reshape([ywindow, image_width//8])
-		int64_data[t,:,:] = datablock[:, xstart//8:(xstart+xwindow)//8]
-	
-	infile.close()
-	
-	# data byte order in file: 7 6 5 4 3 2 1 0 15 14 13 12 11 10 9 8 23 22 ...
-	# shuffle bytes to the right order
-	bytesdata = int64_data.astype('<i8').tobytes()
-	result = np.fromstring(bytesdata, dtype='uint8').reshape([twindow, ywindow, xwindow])
-	
-	if rotate:
-		result = np.fliplr(result).transpose([0, 2, 1]) # why in this order :P ??
-		
-	return result
-	
 
 def spectrogram(section, nperseg, step, framerate=1):
 	nframes, ny, nx = section.shape
@@ -257,10 +206,10 @@ class MeasurementData(QObject):
 	
 	@pyqtProperty(int, notify=folderLoaded)
 	def image_height(self):
-		return self.data.shape[1]
+		return self.video_data.shape[1]
 	
 	def getVideoSnapshot(self, frameindex):
-		imgdata = self.video_data[frameindex]
+		imgdata = self.video_data[frameindex,:,:]
 		qimg = to_aligned_qimage(imgdata, QImage.Format_Grayscale8)
 		return qimg
 
@@ -291,22 +240,13 @@ class FourierAnalyzer(QObject):
 	
 	@pyqtSlot(int, int, int, int, int, int)
 	def analyze(self, x, y, t, width, height, duration):
-		img_width = self._data.image_width
-		img_height = self._data.image_height
 		
-		xstart = x
-		ystart = y
-		tstart = t
-		xwindow = width
-		ywindow = height
-		twindow = duration
 		
 		print('Analyzing...')
-		
 		print('Reading input data')
-		section = read_section(self._data.video_path, xstart, ystart, tstart, xwindow, ywindow, twindow, img_width, img_height)
+		section = self._data.video_data[t:t+duration, y:y+height, x:x+width]
+		print('Calculating')
 		analysis, f = spectrogram(section, self.analysis_window, self.analysis_step, self._data.framerate)
-		
 		
 		self.analysisComplete.emit()
 		print('Done.')
@@ -363,16 +303,19 @@ class BandPassAnalyzer(QObject):
 		framerate = self._data.framerate
 		nyq_freq = framerate/2
 		
+		print('Analyzing...')
+		print('Reading input data')
 		uint8_data = self._data.video_data[t:t+duration, y:y+height, x:x+width]
 		
 		black_treshold = 40
 		zeros = np.where(uint8_data < black_treshold)
 		
+		print('Calculating baseline')
 		if self._remove_baseline:
 			# Running mean
 			f = self._lower_limit / 2
 			N = int(framerate / f)
-			baseline = np.zeros(uint8_data.shape, dtype='float32')
+			baseline = np.zeros(uint8_data.shape, dtype='f4')
 			cumsum = np.cumsum(uint8_data, axis=0)
 			baseline[N:,:,:] = (cumsum[N:,:,:] - cumsum[:-N,:,:]) / N
 			baseline[:N,:,:] = np.mean(uint8_data[:N,:,:], axis=0)
@@ -380,11 +323,12 @@ class BandPassAnalyzer(QObject):
 		else:
 			baseline = np.mean(uint8_data)
 		
-		section = np.zeros(uint8_data.shape, dtype='float32')
+		section = np.zeros(uint8_data.shape, dtype='f4')
 		section[:,:,:] = 100 * (uint8_data / baseline - 1)
 		del baseline
 		del uint8_data
 		
+		print('Filtering')
 		numtaps = 65
 		freqs = [self._lower_limit, self._upper_limit]
 		if freqs[1] > nyq_freq:
@@ -493,7 +437,7 @@ class OverlayImage(AnalysisVisualization):
 		
 		data = self.analyzer.analysis[step, self.frequency, :, :] > self.treshold
 
-		imagearr = np.zeros((data.shape[0], data.shape[1], 4), dtype="uint8")
+		imagearr = np.zeros((data.shape[0], data.shape[1], 4), dtype="u1")
 		imagearr[:,:, 3] = data*255
 		imagearr[:,:, 0] = 255
 		imagestr = imagearr.flatten().tobytes()
