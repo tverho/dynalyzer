@@ -12,7 +12,7 @@ from scipy import signal, ndimage
 class VideoRawData:
 	def __init__(self, folder, config, rotate = True):
 		filenames = get_video_filenames(folder)
-		w, h = config.image_width, config,image_height
+		w, h = config.image_width, config.image_height
 		
 		self.arrays = [create_view(f, w, h, rotate) for f in filenames]
 		self.shape = self.arrays[0].shape
@@ -41,7 +41,12 @@ class VideoRawData:
 		return view
 	
 	def __getitem__(self, slices):
-		frames = slices[0]
+		try:
+			frames = slices[0]
+			rect = slices[1:]
+		except TypeError:
+			frames = slices
+			rect = slice(None)
 		try:
 			start = frames.start
 			end = frames.end
@@ -52,7 +57,7 @@ class VideoRawData:
 		if start is None: start = 0
 		if end is None: end = self.shape[0]
 		
-		rect = slices[1:]
+		
 		partial = None
 		for arr in self.arrays:
 			if partial is not None:
@@ -95,7 +100,7 @@ def get_video_filenames(folder):
 	if 'Camera_Data.sav' in files:
 		return ['Camera_Data.sav']
 
-	result = [file for file in files if file.count('Camera_Data') > 0]
+	result = [os.path.join(folder, file) for file in files if file.count('Camera_Data') > 0]
 	result.sort()
 	return result
 
@@ -214,7 +219,7 @@ class MeasurementData(QObject):
 		QObject.__init__(self, parent)
 		
 		self.data_folder = None
-		self.video_path = None
+		self.video_data = None
 		self.analog_signals = None
 		self.config = None
 		
@@ -226,22 +231,20 @@ class MeasurementData(QObject):
 	def folder(self, folder):
 		folder = QUrl(folder).toLocalFile()
 		self.data_folder = folder
-		configpath = folder + '/config.txt'
+		configpath = os.path.join(folder, 'config.txt')
 		self.config = parse_config(configpath)
-		self.video_path = self.data_folder +'/'+ get_video_filenames(folder)[0]
-		analog_data_path = self.data_folder + '/Analog_Data.sav'
-		nframes = get_video_nframes(self.video_path)
-		self.config.nframes = nframes
+		self.video_data = VideoRawData(folder, self.config)
+		analog_data_path = os.path.join(self.data_folder, 'Analog_Data.sav')
 		self.analog_signals = read_analog_data(analog_data_path)
 		self.folderLoaded.emit()
 		
 	@pyqtProperty(bool, notify=folderLoaded)
 	def ready(self):
-		return self.config != None
+		return self.video_data is not None
 	
 	@pyqtProperty(int, notify=folderLoaded)
 	def nFrames(self):
-		return self.config.nframes
+		return self.video_data.shape[0]
 	
 	@pyqtProperty(int, notify=folderLoaded)
 	def framerate(self):
@@ -249,15 +252,14 @@ class MeasurementData(QObject):
 	
 	@pyqtProperty(int, notify=folderLoaded)
 	def image_width(self):
-		return self.config.image_width
+		return self.video_data.shape[2]
 	
 	@pyqtProperty(int, notify=folderLoaded)
 	def image_height(self):
-		return self.config.image_height
+		return self.data.shape[1]
 	
 	def getVideoSnapshot(self, frameindex):
-		config = self.config
-		imgdata = read_frame(self.video_path, config.image_width, config.image_height, frameindex)
+		imgdata = self.video_data[frameindex]
 		qimg = to_aligned_qimage(imgdata, QImage.Format_Grayscale8)
 		return qimg
 
@@ -357,12 +359,10 @@ class BandPassAnalyzer(QObject):
 	@pyqtSlot(int, int, int, int, int, int)
 	def analyze(self, x, y, t, width, height, duration):
 		del self.analysis
-		img_width = self._data.image_width
-		img_height = self._data.image_height
 		framerate = self._data.framerate
 		nyq_freq = framerate/2
 		
-		uint8_data = read_section(self._data.video_path, x, y, t, width, height, duration, img_width, img_height)
+		uint8_data = self._data.video_data[t:t+duration, y:y+height, x:x+width]
 		
 		black_treshold = 40
 		zeros = np.where(uint8_data < black_treshold)
