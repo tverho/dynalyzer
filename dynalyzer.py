@@ -47,7 +47,7 @@ def get_video_nframes(filename):
 	infile.seek(0, 2)
 	end = infile.tell()
 	infile.close()
-	return (end+1) // framesize
+	return end // framesize
 
 def read_frame(filename, image_width, image_height, frameindex, rotate=True):
 	infile = open(filename)
@@ -143,6 +143,7 @@ def read_analog_data(filename):
 	
 	infile.close()
 	return np.array([signalx, signaly])
+
 
 
 ### GUI related classes ###
@@ -691,6 +692,10 @@ if __name__ == '__main__':
 	qmlRegisterType(VideoExporter, "org.dynalyzer", 1, 0, "VideoExporter");
 		
 	engine = QQmlApplicationEngine()
-	engine.load('dynalyzer.qml')
+		
+	if len(sys.argv) > 1:
+		path = QUrl(sys.argv[1])
+		engine.rootContext().setContextProperty("loadpath", path)
 	
+	engine.load('dynalyzer.qml')
 	app.exec_()

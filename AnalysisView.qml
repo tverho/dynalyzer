@@ -139,23 +139,23 @@ ColumnLayout {
 		ColumnLayout {
 			RowLayout {
 				Label {
-					text: "BPF low (Hz)"
+					text: "BPF freq (Hz)"
 				}
 				
 				TextField {
-					id: bpfLowFrequencyField
+					id: bpfFrequencyField
 					validator: DoubleValidator {bottom: 0; locale: "en"}
 					text: "10"
 				}
 				
 				Label {
-					text: "BPF high (Hz)"
+					text: "\u00b1"
 				}
 				
 				TextField {
-					id: bpfHighFrequencyField
+					id: bpfBandwidthField
 					validator: DoubleValidator {bottom: 0; locale: "en"}
-					text: "11"
+					text: "1"
 				}
 			}
 			
@@ -209,13 +209,15 @@ ColumnLayout {
 					var height = cameraView.selectionHeight;
 					var tstart = navigator.selectionStart;
 					var twindow = navigator.selectionEnd - tstart;
-					bpAnalyzer.lowerLimit = bpfLowFrequencyField.text;
-					bpAnalyzer.upperLimit = bpfHighFrequencyField.text;
+					var freq = bpfFrequencyField.text;
+					var halfWidth = bpfBandwidthField.text / 2;
+					bpAnalyzer.lowerLimit = freq - halfWidth;
+					bpAnalyzer.upperLimit = freq + halfWidth;
 					if (bpfCheckbox.checked)
 						bpAnalyzer.analyze(x, y, tstart, width, height, twindow);
 					if (fftCheckbox.checked)
 						fourierAnalyzer.analyze(x, y, tstart, width, height, twindow);
-						fourierImage.visible = true;
+						spectrumPane.visible = true;
 					analyzedRegion.set();
 					analyzedInterval.set();
 					
@@ -254,9 +256,11 @@ ColumnLayout {
 		}
 		
 		ColumnLayout {
+			id: spectrumPane
+			visible: false
+			
 			SpectrumImage {
 				id:fourierImage
-				visible: false
 				width: 400
 				height: 300
 				analyzer: fourierAnalyzer

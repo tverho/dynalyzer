@@ -13,6 +13,21 @@ ApplicationWindow {
 	height: 800
 	title: "Dynalyzer"
 	
+	property url dataPath
+	
+	onDataPathChanged: {
+		if (tabview.count) {
+			tabview.removeTab(0);
+		}
+		var component = Qt.createComponent("AnalysisView.qml");
+		var tab = tabview.addTab(dataPath);
+		component.createObject(tab, {"folder": dataPath});
+	}
+	
+	Component.onCompleted: {
+		if (typeof loadpath === 'object') dataPath = loadpath;
+	}
+	
 	ColumnLayout {
 		anchors.fill: parent
 		
@@ -26,10 +41,7 @@ ApplicationWindow {
 				title: "Choose a folder"
 				selectFolder: true
 				onAccepted: {
-					var component = Qt.createComponent("AnalysisView.qml");
-					var tab = tabview.addTab(folder);
-					component.createObject(tab, {"folder": folder});
- 					
+					dataPath = folder;
 				}
 			}
 		}
