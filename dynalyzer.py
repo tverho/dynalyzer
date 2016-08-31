@@ -43,28 +43,34 @@ class VideoRawData:
 	def __getitem__(self, slices):
 		clean_slices = []
 		unpack_indices = [slice(None), slice(None), slice(None)]
+		try: list(slices)
+		except: slices = list((slices,))
+		
 		for i in range(3):
 			try:
-				start, end, stride = slices[i].indices(self.shape[i])
+				slices[i].start
+				clean_slices.append(slices[i])
 			except IndexError:
-				start, end = 0, self.shape[i]
+				clean_slices.append(slice(None))
 			except AttributeError:
-				start, end = slices[i], slices[i]+1
-				unpack_indices[i] = 0 # This is an integer index
-			clean_slices.append(slice(start, end))
+				# This is an integer index
+				clean_slices.append(slice(slices[i], slices[i]+1))
+				unpack_indices[i] = 0
 		
 		array = self.get_section(*clean_slices)
 		return array[unpack_indices]
 		
 	def get_section(self, tslice, yslice, xslice):
 		start, end = tslice.start, tslice.stop
-		
 		if self.rotate:
-			range1, range2 = xslice, yslice
+			start1, end1, step1 = xslice.indices(self.shape[1])
+			start1, end1, step1 = self.shape[1] - start1, self.shape[1] - end1, -step1
+			start2, end2, step2 = yslice.indices(self.shape[2])
 		else:
-			range1, range2 = yslice, xslice
+			start1, end1, step1 = yslice.indices(self.shape[1])
+			start2, end2, step2 = xslice.indices(self.shape[2])
 		
-		rect = (slice(None), range1, slice(range2.start // 8, range2.stop // 8))
+		rect = (slice(None), slice(start1, end1, step1), slice(start2 // 8, end2 // 8))
 		section = None
 		for arr in self.arrays:
 			if section is not None:
@@ -86,7 +92,7 @@ class VideoRawData:
 		
 		section = section.reshape((section.shape[0], section.shape[1], section.shape[2]*section.shape[3]))
 		if self.rotate:
-			section = np.fliplr(section).transpose((0, 2, 1))
+			section = section.transpose((0, 2, 1))
 		
 		return section
 
@@ -209,7 +215,7 @@ class MeasurementData(QObject):
 		return self.video_data.shape[1]
 	
 	def getVideoSnapshot(self, frameindex):
-		imgdata = self.video_data[frameindex,:,:]
+		imgdata = self.video_data[frameindex]
 		qimg = to_aligned_qimage(imgdata, QImage.Format_Grayscale8)
 		return qimg
 
@@ -275,6 +281,7 @@ class BandPassAnalyzer(QObject):
 		self._upper_limit = None
 		self._remove_baseline = True
 		self._temporal_averaging = 10
+		self.downsampling = 1
 	
 	@pyqtProperty(float)
 	def lowerLimit(self):
@@ -303,9 +310,20 @@ class BandPassAnalyzer(QObject):
 		framerate = self._data.framerate
 		nyq_freq = framerate/2
 		
+		downsampling = 1
+		#while self._upper_limit < nyq_freq/(downsampling*2):
+		#	downsampling += 1
+		
 		print('Analyzing...')
 		print('Reading input data')
 		uint8_data = self._data.video_data[t:t+duration, y:y+height, x:x+width]
+		
+		if downsampling > 1:
+			print(downsampling)
+			uint8_data = uint8_data[::downsampling]
+			self.downsampling = downsampling
+			framerate /= downsampling
+			nyq_freq = framerate / 2
 		
 		black_treshold = 40
 		zeros = np.where(uint8_data < black_treshold)
@@ -471,7 +489,7 @@ class BPFOverlayImage(AnalysisVisualization):
 	def paint(self, painter):
 		if self.analyzer is None or self.analyzer.analysis is None: return
 	
-		t = self.frame - self.analyzer.t0
+		t = (self.frame - self.analyzer.t0) // self.analyzer.downsampling
 		if t < 0 or t >= self.analyzer.analysis.shape[0]: return 
 	
 		frame = np.abs(self.analyzer.analysis[t, :, :])
