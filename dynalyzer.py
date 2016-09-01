@@ -61,11 +61,11 @@ class VideoRawData:
 		return array[unpack_indices]
 		
 	def get_section(self, tslice, yslice, xslice):
-		start, end = tslice.start, tslice.stop
+		start, end, step = tslice.indices(self.shape[0])
 		if self.rotate:
-			start1, end1, step1 = xslice.indices(self.shape[1])
-			start1, end1, step1 = self.shape[1] - start1, self.shape[1] - end1, -step1
-			start2, end2, step2 = yslice.indices(self.shape[2])
+			start1, end1, step1 = xslice.indices(self.shape[2])
+			start1, end1, step1 = -start1-1, -end1-1, -step1
+			start2, end2, step2 = yslice.indices(self.shape[1])
 		else:
 			start1, end1, step1 = yslice.indices(self.shape[1])
 			start2, end2, step2 = xslice.indices(self.shape[2])
@@ -75,17 +75,17 @@ class VideoRawData:
 		for arr in self.arrays:
 			if section is not None:
 				if end > arr.shape[0]:
-					section = np.vstack((partial, arr[:][rect]))
+					section = np.vstack((partial, arr[::step][rect]))
 				else:
-					section = np.vstack((partial, arr[:end][rect]))
+					section = np.vstack((partial, arr[:end:step][rect]))
 					break
 			
 			elif end <= arr.shape[0]:
-				section = arr[start:end][rect]
+				section = arr[start:end:step][rect]
 				break
 			
 			elif start < arr.shape[0]:
-				section = arr[start:][rect]
+				section = arr[start::step][rect]
 					
 			start -= arr.shape[0]
 			end -= arr.shape[0]
@@ -307,29 +307,28 @@ class BandPassAnalyzer(QObject):
 	@pyqtSlot(int, int, int, int, int, int)
 	def analyze(self, x, y, t, width, height, duration):
 		del self.analysis
-		framerate = self._data.framerate
-		nyq_freq = framerate/2
-		
-		downsampling = 1
-		#while self._upper_limit < nyq_freq/(downsampling*2):
-		#	downsampling += 1
 		
 		print('Analyzing...')
-		print('Reading input data')
-		uint8_data = self._data.video_data[t:t+duration, y:y+height, x:x+width]
 		
-		if downsampling > 1:
-			print(downsampling)
-			uint8_data = uint8_data[::downsampling]
-			self.downsampling = downsampling
-			framerate /= downsampling
+		framerate = self._data.framerate
+		nyq_freq = framerate / 2
+		
+		if False:
+			framerate = self._data.framerate
+			min_nyq_freq = self._upper_limit
 			nyq_freq = framerate / 2
+			self.downsampling = int(nyq_freq / min_nyq_freq)
+			framerate /= self.downsampling
+			nyq_freq = framerate / 2
+	
+		print('Reading input data')
+		uint8_data = self._data.video_data[t:t+duration:self.downsampling, y:y+height, x:x+width]
 		
 		black_treshold = 40
 		zeros = np.where(uint8_data < black_treshold)
 		
-		print('Calculating baseline')
 		if self._remove_baseline:
+			print('Calculating baseline')
 			# Running mean
 			f = self._lower_limit / 2
 			N = int(framerate / f)
@@ -342,7 +341,7 @@ class BandPassAnalyzer(QObject):
 			baseline = np.mean(uint8_data)
 		
 		section = np.zeros(uint8_data.shape, dtype='f4')
-		section[:,:,:] = 100 * (uint8_data / baseline - 1)
+		section[:,:,:] = 100 * (uint8_data/baseline - 1)
 		del baseline
 		del uint8_data
 		
@@ -369,6 +368,7 @@ class BandPassAnalyzer(QObject):
 		self.x0 = x
 		self.y0 = y
 		self.analysisComplete.emit()
+		print('Done.')
 		
 
 class SnapshotView(QQuickPaintedItem):

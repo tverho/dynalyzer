@@ -209,8 +209,8 @@ ColumnLayout {
 					var height = cameraView.selectionHeight;
 					var tstart = navigator.selectionStart;
 					var twindow = navigator.selectionEnd - tstart;
-					var freq = bpfFrequencyField.text;
-					var halfWidth = bpfBandwidthField.text / 2;
+					var freq = Number(bpfFrequencyField.text);
+					var halfWidth = Number(bpfBandwidthField.text) / 2.0;
 					bpAnalyzer.lowerLimit = freq - halfWidth;
 					bpAnalyzer.upperLimit = freq + halfWidth;
 					if (bpfCheckbox.checked)
