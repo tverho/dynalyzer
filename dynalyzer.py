@@ -605,10 +605,11 @@ class AnalogSignalPlot(QQuickPaintedItem):
 		duration = self._data.nFrames/self._data.framerate
 		nsamples = int(duration*self._data.config.analog_samplerate)
 
-		y = -signals[0,:nsamples]
+		y = signals[0,:nsamples]
 		y -= np.min(y)
 
 		y /= np.max(y[len(y)//4:])
+		y = 1 - y
 		y *= height
 		
 		x = np.linspace(0, width, len(y))
