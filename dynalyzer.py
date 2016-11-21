@@ -259,9 +259,9 @@ class FourierAnalyzer(QObject):
 		print ('Min freq:', f[1])
 		
 		self.analysis = analysis
-		self.t0 = tstart
-		self.x0 = xstart
-		self.y0 = ystart
+		self.t0 = t
+		self.x0 = x
+		self.y0 = y
 		self.frequencies = f[1:]
 		self.max_value = self.analysis.max()
 
@@ -359,7 +359,7 @@ class BandPassAnalyzer(QObject):
 		analysis = np.abs(analysis)
 		if self._temporal_averaging:
 			#N = self._temporal_averaging
-			N = framerate / (self._lower_limit + self._upper_limit)
+			N = framerate * 10 / (self._lower_limit + self._upper_limit)
 			b = np.ones(N) / N
 			analysis = signal.lfilter(b, 1, analysis, axis=0)
 					
