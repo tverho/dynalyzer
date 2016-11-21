@@ -235,8 +235,9 @@ ColumnLayout {
 						nameFilters: [ "Image files (*.jpg *.png)", "All files (*)" ]
 						selectExisting: false
 						onAccepted: {
+							var filepath = (fileUrl+"").replace('file://', '')
 							cameraView.grabToImage(function(image) {
-								console.log(image.saveToFile("snapshot.png"));
+								image.saveToFile(filepath);
 							});
 						}
 					}

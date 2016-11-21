@@ -1,6 +1,6 @@
 import numpy as np
 import os
-from matplotlib import pyplot
+#from matplotlib import pyplot
 import xml.etree.ElementTree as ET
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal, Qt, QUrl
 from PyQt5.QtGui import QImage, QTransform, QColor, QPainter
