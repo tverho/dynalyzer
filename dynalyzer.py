@@ -1,6 +1,6 @@
 import numpy as np
 import os
-from matplotlib import pyplot
+#from matplotlib import pyplot
 import xml.etree.ElementTree as ET
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal, Qt, QUrl
 from PyQt5.QtGui import QImage, QTransform, QColor, QPainter
@@ -75,9 +75,9 @@ class VideoRawData:
 		for arr in self.arrays:
 			if section is not None:
 				if end > arr.shape[0]:
-					section = np.vstack((partial, arr[::step][rect]))
+					section = np.vstack((section, arr[::step][rect]))
 				else:
-					section = np.vstack((partial, arr[:end:step][rect]))
+					section = np.vstack((section, arr[:end:step][rect]))
 					break
 			
 			elif end <= arr.shape[0]:
