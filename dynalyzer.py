@@ -265,111 +265,77 @@ class FourierAnalyzer(QObject):
 		self.frequencies = f[1:]
 		self.max_value = self.analysis.max()
 
-class BandPassAnalyzer(QObject):
-	
+
+class DifferenceAnalyzer(QObject):
+    
 	analysisComplete = pyqtSignal()
-	
+    
 	def __init__(self, parent=None):
 		QObject.__init__(self, parent)
 		
 		self._data = None
-		self.analysis = None
-		self.t0 = None
-		self.x0 = None
-		self.y0 = None
-		self._lower_limit = 0
-		self._upper_limit = None
-		self._remove_baseline = True
-		self._temporal_averaging = 10
-		self.downsampling = 1
-	
-	@pyqtProperty(float)
-	def lowerLimit(self):
-		return self._lower_limit
-	@lowerLimit.setter
-	def lowerLimit(self, val):
-		self._lower_limit = val
-	
-	@pyqtProperty(float)
-	def upperLimit(self):
-		return self._upper_limit
-	@upperLimit.setter
-	def upperLimit(self, val):
-		self._upper_limit = val
-	
+		self._interval = 10
+		self._temporal_averaging = None
+		self._black_treshold = 20
+		self._relative_mode = True
+    
 	@pyqtProperty(MeasurementData)
 	def measurementData(self):
 		return self._data
 	@measurementData.setter
 	def measurementData(self, val):
 		self._data = val
-		
-	@pyqtSlot(int, int, int, int, int, int)
-	def analyze(self, x, y, t, width, height, duration):
-		del self.analysis
-		
-		print('Analyzing...')
-		
-		framerate = self._data.framerate
-		nyq_freq = framerate / 2
-		
-		if False:
-			framerate = self._data.framerate
-			min_nyq_freq = self._upper_limit
-			nyq_freq = framerate / 2
-			self.downsampling = int(nyq_freq / min_nyq_freq)
-			framerate /= self.downsampling
-			nyq_freq = framerate / 2
-	
-		print('Reading input data')
-		uint8_data = self._data.video_data[t:t+duration:self.downsampling, y:y+height, x:x+width]
-		
-		black_treshold = 40
-		zeros = np.where(uint8_data < black_treshold)
-		
-		if self._remove_baseline:
-			print('Calculating baseline')
-			# Running mean
-			f = self._lower_limit / 2
-			N = int(framerate / f)
-			baseline = np.zeros(uint8_data.shape, dtype='f4')
-			cumsum = np.cumsum(uint8_data, axis=0)
-			baseline[N:,:,:] = (cumsum[N:,:,:] - cumsum[:-N,:,:]) / N
-			baseline[:N,:,:] = np.mean(uint8_data[:N,:,:], axis=0)
-			del cumsum
-		else:
-			baseline = np.mean(uint8_data)
-		
-		section = np.zeros(uint8_data.shape, dtype='f4')
-		section[:,:,:] = 100 * (uint8_data/baseline - 1)
-		del baseline
-		del uint8_data
-		
-		print('Filtering')
-		numtaps = 65
-		freqs = [self._lower_limit, self._upper_limit]
-		if freqs[1] > nyq_freq:
-			freqs = [freqs[0]]
-		coeffs = signal.firwin(numtaps, freqs, nyq=nyq_freq, pass_zero=False)
-		analysis = signal.lfilter(coeffs, 1, section, axis=0)
-		
-		analysis[zeros] = 0
-		
-		del section
-		analysis = np.abs(analysis)
-		if self._temporal_averaging:
-			#N = self._temporal_averaging
-			N = framerate * 10 / (self._lower_limit + self._upper_limit)
-			b = np.ones(N) / N
-			analysis = signal.lfilter(b, 1, analysis, axis=0)
-					
-		self.analysis = analysis
-		self.t0 = t
-		self.x0 = x
-		self.y0 = y
 		self.analysisComplete.emit()
-		print('Done.')
+        
+	@pyqtProperty(int)
+	def interval(self):
+		return self._interval
+	@interval.setter
+	def interval(self, val):
+		self._interval = val
+		self.analysisComplete.emit()
+
+	@pyqtProperty(int)
+	def temporalAveraging(self):
+		return self._temporal_averaging
+	@temporalAveraging.setter
+	def temporalAveraging(self, val):
+		self._temporal_averaging = val
+		self.analysisComplete.emit()
 		
+	@pyqtProperty(int)
+	def blackTreshold(self):
+		return self._black_treshold
+	@blackTreshold.setter
+	def blackTreshold(self, val):
+		self._black_treshold = val
+		self.analysisComplete.emit()
+
+	def analyzeSnapshot(self, t):
+		t_averaging = self._temporal_averaging
+		t0 = t - self._interval
+		if t0 < 0: return None
+		
+		video_data = self._data.video_data
+		
+		
+		if t_averaging:
+			if t0 - t_averaging < 0: return None
+			
+			cur = np.mean(video_data[t-t_averaging:t], axis=0)
+			prev = np.mean(video_data[t0-t_averaging:t0], axis=0)
+		else:
+			cur = np.array(video_data[t], dtype=int)
+			prev = video_data[t0]
+		
+		difference = np.abs(cur - prev)
+		
+		zeros = np.where(video_data[t] < self._black_treshold)
+		difference[zeros] = 0
+		
+		if self._relative_mode:
+			difference = difference / video_data[t] * 100
+		return difference
 
 class SnapshotView(QQuickPaintedItem):
 	
@@ -415,61 +381,14 @@ class AnalysisVisualization(QQuickPaintedItem):
 		if val:
 			self._analyzer.analysisComplete.connect(self.update)
 
-class OverlayImage(AnalysisVisualization):
+
+class DifferenceOverlayImage(AnalysisVisualization):
 	def __init__(self, parent=None):
 		AnalysisVisualization.__init__(self, parent)
 		self._frame = 0
-		self._overlay_treshold = 0
-		self._overlay_frequency = 0
-
-	@pyqtProperty(int)
-	def frame(self):
-		return self._frame
-	@frame.setter
-	def frame(self, val):
-		self._frame = val
-		self.update()
+		self._overlay_treshold = 1
+		self._smooth_radius = 2
 		
-	@pyqtProperty(int)
-	def treshold(self):
-		return self._overlay_treshold
-	@treshold.setter
-	def treshold(self, val):
-		self._overlay_treshold = val
-		self.update()
-		
-	@pyqtProperty(int)
-	def frequency(self):
-		return self._overlay_frequency
-	@frequency.setter
-	def frequency(self, val):
-		self._overlay_frequency = val
-		self.update()
-
-	def paint(self, painter):
-		if self.analyzer is None or self.analyzer.analysis is None: return
-	
-		step = (self.frame - self.analyzer.t0) // self.analyzer.analysis_step
-		if step < 0 or step >= self.analyzer.analysis.shape[0]:
-			return
-		
-		data = self.analyzer.analysis[step, self.frequency, :, :] > self.treshold
-
-		imagearr = np.zeros((data.shape[0], data.shape[1], 4), dtype="u1")
-		imagearr[:,:, 3] = data*255
-		imagearr[:,:, 0] = 255
-		imagestr = imagearr.flatten().tobytes()
-		image_height, image_width = data.shape
-		qimg = QImage(imagestr, image_width, image_height, QImage.Format_ARGB32)
-		painter.drawImage(0, 0, qimg)
-
-class BPFOverlayImage(AnalysisVisualization):
-	def __init__(self, parent=None):
-		AnalysisVisualization.__init__(self, parent)
-		self._frame = 0
-		self._overlay_treshold = 0
-		self._smooth_radius = 1.5
-
 	@pyqtProperty(int)
 	def frame(self):
 		return self._frame
@@ -486,13 +405,30 @@ class BPFOverlayImage(AnalysisVisualization):
 		self._overlay_treshold = val
 		self.update()
 		
+	@pyqtProperty(float)
+	def spatialAveraging(self):
+		return self._smooth_radius
+	@spatialAveraging.setter
+	def spatialAveraging(self, val):
+		self._smooth_radius = val
+		self.update()
+		
+	@pyqtProperty(int)
+	def interval(self):
+		return self.analyzer.interval
+	@interval.setter
+	def interval(self, val):
+		self.analyzer.interval = val
+		self.update()
+
 	def paint(self, painter):
-		if self.analyzer is None or self.analyzer.analysis is None: return
+		if self.analyzer is None or not self.isVisible(): return
 	
-		t = (self.frame - self.analyzer.t0) // self.analyzer.downsampling
-		if t < 0 or t >= self.analyzer.analysis.shape[0]: return 
+		t = self._frame
 	
-		frame = np.abs(self.analyzer.analysis[t, :, :])
+		frame = self.analyzer.analyzeSnapshot(t)
+		if frame is None: return
+	
 		if self._smooth_radius:
 			frame = ndimage.gaussian_filter(frame, self._smooth_radius)
 	
@@ -509,7 +445,6 @@ class BPFOverlayImage(AnalysisVisualization):
 		image_height, image_width = frame.shape
 		qimg = QImage(imagestr, image_width, image_height, QImage.Format_ARGB32)
 		painter.drawImage(0, 0, qimg)
-
 
 class SpectrumImage(AnalysisVisualization):
 	def __init__(self, parent=None):
@@ -636,7 +571,7 @@ def to_aligned_qimage(imgarr, format):
 	qimg = QImage(aligned.tobytes(), image_width, image_height, format)
 	return qimg
 
-
+"""
 class VideoExporter(QObject):
 	
 	@pyqtSlot(BandPassAnalyzer, str, int)
@@ -697,6 +632,8 @@ class VideoExporter(QObject):
 			print('saving frame', i)
 			image.save('{0}/frame{1:03d}.png'.format(folder, i))	
 
+"""
+
 if __name__ == '__main__':
 	from PyQt5.QtQml import QQmlApplicationEngine
 	from PyQt5.QtGui import QGuiApplication
@@ -705,14 +642,13 @@ if __name__ == '__main__':
 	app = QApplication(sys.argv)
 	
 	qmlRegisterType(MeasurementData, "org.dynalyzer", 1, 0, "MeasurementData");
-	qmlRegisterType(BandPassAnalyzer, "org.dynalyzer", 1, 0, "BandPassAnalyzer");
+	qmlRegisterType(DifferenceAnalyzer, "org.dynalyzer", 1, 0, "DifferenceAnalyzer");
 	qmlRegisterType(FourierAnalyzer, "org.dynalyzer", 1, 0, "FourierAnalyzer");
 	qmlRegisterType(SnapshotView, "org.dynalyzer", 1, 0, "SnapshotView");
-	qmlRegisterType(OverlayImage, "org.dynalyzer", 1, 0, "OverlayImage");
-	qmlRegisterType(BPFOverlayImage, "org.dynalyzer", 1, 0, "BPFOverlayImage");
+	qmlRegisterType(DifferenceOverlayImage, "org.dynalyzer", 1, 0, "DifferenceOverlayImage");
 	qmlRegisterType(SpectrumImage, "org.dynalyzer", 1, 0, "SpectrumImage");
 	qmlRegisterType(AnalogSignalPlot, "org.dynalyzer", 1, 0, "AnalogSignalPlot");
-	qmlRegisterType(VideoExporter, "org.dynalyzer", 1, 0, "VideoExporter");
+	#qmlRegisterType(VideoExporter, "org.dynalyzer", 1, 0, "VideoExporter");
 		
 	engine = QQmlApplicationEngine()
 		

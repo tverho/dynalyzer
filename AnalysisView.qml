@@ -63,6 +63,18 @@ ColumnLayout {
 					}
 				}
 				
+				DifferenceOverlayImage {
+					id: diffOverlayImage
+					visible: overlayCheckbox.checked
+					anchors.fill: parent
+					analyzer: diffAnalyzer
+					frame: navigator.curFrame
+					treshold: overlayTresholdField.value
+					spatialAveraging: spatialAveragingField.value
+					scale: cameraView.scaleFactor
+					transformOrigin: Item.TopLeft
+				}
+			
 				Rectangle {
 					id: analyzedRegion
 					visible: false
@@ -77,18 +89,6 @@ ColumnLayout {
 					y: dataY * cameraView.scaleFactor
 					width: dataWidth * cameraView.scaleFactor
 					height: dataHeight * cameraView.scaleFactor
-					
-					BPFOverlayImage {
-						id: overlayImage
-						visible: overlayCheckbox.checked
-						anchors.fill: parent
-						analyzer: bpAnalyzer
-						frame: navigator.curFrame
-						//frequency: overlayFrequencyField.text
-						treshold: overlayTresholdField.text != ""? overlayTresholdField.text : 999999
-						scale: cameraView.scaleFactor
-						transformOrigin: Item.TopLeft
-					}
 					
 					Item {
 						id: cross
@@ -137,65 +137,81 @@ ColumnLayout {
 		}
 		
 		ColumnLayout {
-			RowLayout {
-				Label {
-					text: "BPF freq (Hz)"
-				}
-				
-				TextField {
-					id: bpfFrequencyField
-					validator: DoubleValidator {bottom: 0; locale: "en"}
-					text: "10"
-				}
-				
-				Label {
-					text: "\u00b1"
-				}
-				
-				TextField {
-					id: bpfBandwidthField
-					validator: DoubleValidator {bottom: 0; locale: "en"}
-					text: "1"
-				}
-			}
+			id: propertiesPane
+			property double labelWidth: 200
 			
 			CheckBox {
 				id: overlayCheckbox
 				text: "Overlay"
 				checked: true
 			}
-			/*RowLayout {
+			
+			RowLayout {
 				Label {
-					text: "frequency"
+					text: "Comparison interval"
+					Layout.minimumWidth: propertiesPane.labelWidth
 				}
 				
-				TextField {
-					id: overlayFrequencyField
-					validator: IntValidator {bottom: 0}
-					text: "1"
-				}
-			}*/
-			RowLayout {
-				Label{
-					text: "Treshold"
-				}
-				TextField {
-					id: overlayTresholdField
+				ValueField {
+					id: intervalField
 					validator: DoubleValidator {bottom: 0; locale: "en"}
 					text: "10"
 				}
 			}
 			
-			CheckBox {
-				id: fftCheckbox
-				text: "FFT"
-				checked: false
+			RowLayout {
+				Label {
+					text: "Treshold"
+					Layout.minimumWidth: propertiesPane.labelWidth
+				}
+				ValueField {
+					id: overlayTresholdField
+					validator: DoubleValidator {bottom: 0; locale: "en"}
+					text: "5"
+				}
 			}
-			CheckBox {
-				id: bpfCheckbox
-				text: "BPF"
-				checked: true
+			
+			RowLayout {
+				
+				Label {
+					text: "Temporal averaging"
+					Layout.minimumWidth: propertiesPane.labelWidth
+				}
+				
+				ValueField {
+					id: temporalAveragingField
+					validator: DoubleValidator {bottom: 0; locale: "en"}
+					text: "0"
+				}
 			}
+			
+			
+			RowLayout {
+				Label {
+					text: "Spatial averaging"
+					Layout.minimumWidth: propertiesPane.labelWidth
+				}
+				
+				ValueField {
+					id: spatialAveragingField
+					validator: DoubleValidator {bottom: 0; locale: "en"}
+					text: "1.5"
+				}
+			}
+			
+			RowLayout {
+				Label {
+					text: "Black treshold"
+					Layout.minimumWidth: propertiesPane.labelWidth
+				}
+				
+				ValueField {
+					id: blackTresholdField
+					validator: IntValidator {bottom: 0; locale: "en"}
+					text: "20"
+				}
+			}
+			
 			
 			Button {
 				text: "Analyze"
@@ -209,15 +225,8 @@ ColumnLayout {
 					var height = cameraView.selectionHeight;
 					var tstart = navigator.selectionStart;
 					var twindow = navigator.selectionEnd - tstart;
-					var freq = Number(bpfFrequencyField.text);
-					var halfWidth = Number(bpfBandwidthField.text) / 2.0;
-					bpAnalyzer.lowerLimit = freq - halfWidth;
-					bpAnalyzer.upperLimit = freq + halfWidth;
-					if (bpfCheckbox.checked)
-						bpAnalyzer.analyze(x, y, tstart, width, height, twindow);
-					if (fftCheckbox.checked)
-						fourierAnalyzer.analyze(x, y, tstart, width, height, twindow);
-						spectrumPane.visible = true;
+					fourierAnalyzer.analyze(x, y, tstart, width, height, twindow);
+					spectrumPane.visible = true;
 					analyzedRegion.set();
 					analyzedInterval.set();
 					
@@ -242,7 +251,7 @@ ColumnLayout {
 						}
 					}
 			}
-			
+			/*
 			Button {
 				text: "Save video"
 				
@@ -253,7 +262,7 @@ ColumnLayout {
 				VideoExporter {
 					id:exporter
 				}
-			}
+			}*/
 		}
 		
 		ColumnLayout {
@@ -388,6 +397,31 @@ ColumnLayout {
 				text: "next"
 				onClicked: navigator.setFrame(navigator.curFrame+1)
 			}
+			
+			Button {
+				text: "play"
+				onClicked: {
+					if (playTimer.running) {
+						playTimer.stop();
+						text = "start";
+					} else {
+						playTimer.start();
+						text = "stop"
+					}
+					
+				}
+				
+				Timer {
+					id: playTimer
+					interval: 100
+					repeat: true
+					onTriggered: navigator.curFrame += 10
+				}
+			}
+			
+			Label {
+				text: "" + (1000*navigator.curFrame / measurementData.framerate) + "ms"
+			}
 		}
 	}
 	
@@ -396,9 +430,13 @@ ColumnLayout {
 		measurementData: measurementData
 	}
 	
-	BandPassAnalyzer {
-		id: bpAnalyzer
+	DifferenceAnalyzer {
+		id: diffAnalyzer
 		measurementData: measurementData
+		
+		interval: intervalField.value
+		temporalAveraging: temporalAveragingField.value
+		blackTreshold: blackTresholdField.value
 	}
 	
 	MeasurementData {
