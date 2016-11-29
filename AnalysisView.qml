@@ -1,7 +1,7 @@
-import QtQuick 2.1
-import QtQuick.Controls 1.1
+import QtQuick 2.3
+import QtQuick.Controls 1.2
 import QtQuick.Layouts 1.0
-import QtQuick.Dialogs 1.1
+import QtQuick.Dialogs 1.2
 
 import org.dynalyzer 1.0
 
@@ -138,7 +138,7 @@ ColumnLayout {
 		
 		ColumnLayout {
 			id: propertiesPane
-			property double labelWidth: 200
+			property double labelWidth: 180
 			
 			CheckBox {
 				id: overlayCheckbox
@@ -155,7 +155,7 @@ ColumnLayout {
 				ValueField {
 					id: intervalField
 					validator: DoubleValidator {bottom: 0; locale: "en"}
-					text: "10"
+					text: "20"
 				}
 			}
 			
@@ -167,7 +167,7 @@ ColumnLayout {
 				ValueField {
 					id: overlayTresholdField
 					validator: DoubleValidator {bottom: 0; locale: "en"}
-					text: "5"
+					text: "8"
 				}
 			}
 			
@@ -181,7 +181,7 @@ ColumnLayout {
 				ValueField {
 					id: temporalAveragingField
 					validator: DoubleValidator {bottom: 0; locale: "en"}
-					text: "0"
+					text: "10"
 				}
 			}
 			
@@ -195,7 +195,7 @@ ColumnLayout {
 				ValueField {
 					id: spatialAveragingField
 					validator: DoubleValidator {bottom: 0; locale: "en"}
-					text: "1.5"
+					text: "2"
 				}
 			}
 			
@@ -210,6 +210,12 @@ ColumnLayout {
 					validator: IntValidator {bottom: 0; locale: "en"}
 					text: "20"
 				}
+			}
+			
+			CheckBox {
+				id: relativeModeCheckbox
+				text: "Relative mode"
+				checked: true
 			}
 			
 			
@@ -239,30 +245,59 @@ ColumnLayout {
 				onClicked: saveImageDialog.open()
 
 				FileDialog {
-						id: saveImageDialog
-						title: "Save image"
-						nameFilters: [ "Image files (*.jpg *.png)", "All files (*)" ]
-						selectExisting: false
-						onAccepted: {
-							var filepath = (fileUrl+"").replace('file://', '')
-							cameraView.grabToImage(function(image) {
-								image.saveToFile(filepath);
-							});
-						}
+					id: saveImageDialog
+					title: "Save image"
+					nameFilters: [ "Image files (*.jpg *.png)", "All files (*)" ]
+					selectExisting: false
+					onAccepted: {
+						console.log(propertiesPane.toJSON());
+						var filepath = (fileUrl+'').replace('file://', '')
+						/*cameraView.grabToImage(function(image) {
+							image.saveToFile(filepath);
+						});*/
+						
+						imageExporter.saveImage(measurementData, diffOverlayImage, navigator.curFrame, filepath)
+						folder = folder; // Won't remember it otherwise!
 					}
+				}
+				
+				
 			}
-			/*
 			Button {
-				text: "Save video"
+				text: "Save image series"
 				
 				onClicked: {
-					exporter.saveVideoFrames(main.hpAnalyzer, "/home/tuukka/tmp/dynamat_video", 10)
+					if (navigator.selectionEnd - navigator.selectionStart > 0)
+						saveImageSeriesDialog.setRange(navigator.selectionStart, navigator.selectionEnd);
+					saveImageSeriesDialog.open();
+				}
+					
+				
+				ExportDialog {
+					id: saveImageSeriesDialog
+					
+					onAccepted: {
+						var path = (folder+'').replace('file://', '');
+						imageExporter.saveImageSeries(measurementData, diffOverlayImage, frames, path, range);
+					}
 				}
 				
-				VideoExporter {
-					id:exporter
-				}
-			}*/
+			}
+			
+			ImageExporter {
+				id: imageExporter
+			}
+						
+			function toJSON() {
+				var pars = {
+					interval: intervalField.value,
+					treshold: overlayTresholdField.value,
+					temporalAveraging: temporalAveragingField.value,
+					spatialAveraging: spatialAveragingField.value,
+					blackTreshold: blackTresholdField.value
+				};
+				return JSON.stringify(pars);
+			}
 		}
 		
 		ColumnLayout {
@@ -420,7 +455,8 @@ ColumnLayout {
 			}
 			
 			Label {
-				text: "" + (1000*navigator.curFrame / measurementData.framerate) + "ms"
+				text: "" + (1000*navigator.curFrame / measurementData.framerate) +
+					"ms   (" + measurementData.framerate + " frames/s)"
 			}
 		}
 	}
@@ -437,6 +473,7 @@ ColumnLayout {
 		interval: intervalField.value
 		temporalAveraging: temporalAveragingField.value
 		blackTreshold: blackTresholdField.value
+		relativeMode: relativeModeCheckbox.checked
 	}
 	
 	MeasurementData {

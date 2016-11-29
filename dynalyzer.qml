@@ -1,7 +1,7 @@
-import QtQuick 2.1
-import QtQuick.Controls 1.1
+import QtQuick 2.3
+import QtQuick.Controls 1.2
 import QtQuick.Layouts 1.0
-import QtQuick.Dialogs 1.1
+import QtQuick.Dialogs 1.2
 
 import org.dynalyzer 1.0
 
@@ -16,11 +16,11 @@ ApplicationWindow {
 	property url dataPath
 	
 	onDataPathChanged: {
-		if (tabview.count) {
+		/*if (tabview.count) {
 			tabview.removeTab(0);
-		}
+		}*/
 		var component = Qt.createComponent("AnalysisView.qml");
-		var tab = tabview.addTab(dataPath);
+		var tab = tabview.addTab(dataPath.toString().split('/').pop());
 		component.createObject(tab, {"folder": dataPath});
 	}
 	
@@ -42,6 +42,7 @@ ApplicationWindow {
 				selectFolder: true
 				onAccepted: {
 					dataPath = folder;
+					folder = folder; // Won't remember it otherwise!
 				}
 			}
 		}

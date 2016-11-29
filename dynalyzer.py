@@ -9,6 +9,19 @@ from PyQt5.QtQuick import QQuickImageProvider, QQuickPaintedItem
 from PyQt5.QtQml import qmlRegisterType
 from scipy import signal, ndimage
 
+
+def map_property(type, attrname, notify=None, on_modified=None):
+	def getter(self):
+		return getattr(self, attrname)
+	def setter(self, val):
+		setattr(self, attrname, val)
+		if notify: getattr(self, notify).emit()
+		if on_modified: getattr(self, on_modified)()
+	if notify:
+		return pyqtProperty(type, getter, setter, notify)
+	else:
+		return pyqtProperty(type, getter, setter)
+
 class VideoRawData:
 	def __init__(self, folder, config, rotate = True):
 		filenames = get_video_filenames(folder)
@@ -178,7 +191,7 @@ class MeasurementData(QObject):
 		self.video_data = None
 		self.analog_signals = None
 		self.config = None
-		
+	
 	@pyqtProperty(str, notify=folderLoaded)
 	def folder(self):
 		return self.data_folder
@@ -268,7 +281,7 @@ class FourierAnalyzer(QObject):
 
 class DifferenceAnalyzer(QObject):
     
-	analysisComplete = pyqtSignal()
+	parametersChanged = pyqtSignal()
     
 	def __init__(self, parent=None):
 		QObject.__init__(self, parent)
@@ -279,49 +292,20 @@ class DifferenceAnalyzer(QObject):
 		self._black_treshold = 20
 		self._relative_mode = True
     
-	@pyqtProperty(MeasurementData)
-	def measurementData(self):
-		return self._data
-	@measurementData.setter
-	def measurementData(self, val):
-		self._data = val
-		self.analysisComplete.emit()
-        
-	@pyqtProperty(int)
-	def interval(self):
-		return self._interval
-	@interval.setter
-	def interval(self, val):
-		self._interval = val
-		self.analysisComplete.emit()
-
-	@pyqtProperty(int)
-	def temporalAveraging(self):
-		return self._temporal_averaging
-	@temporalAveraging.setter
-	def temporalAveraging(self, val):
-		self._temporal_averaging = val
-		self.analysisComplete.emit()
-		
-	@pyqtProperty(int)
-	def blackTreshold(self):
-		return self._black_treshold
-	@blackTreshold.setter
-	def blackTreshold(self, val):
-		self._black_treshold = val
-		self.analysisComplete.emit()
+	measurementData = map_property(MeasurementData, '_data', notify='parametersChanged')
+	interval = map_property(int, '_interval', notify='parametersChanged')
+	temporalAveraging = map_property(int, '_temporal_averaging', notify='parametersChanged')
+	blackTreshold = map_property(int, '_black_treshold', notify='parametersChanged')
+	relativeMode = map_property(bool, '_relative_mode', notify='parametersChanged')
 
 	def analyzeSnapshot(self, t):
 		t_averaging = self._temporal_averaging
 		t0 = t - self._interval
-		if t0 < 0: return None
+		if t0-t_averaging < 0: return None
 		
 		video_data = self._data.video_data
 		
-		
 		if t_averaging:
-			if t0 - t_averaging < 0: return None
-			
 			cur = np.mean(video_data[t-t_averaging:t], axis=0)
 			prev = np.mean(video_data[t0-t_averaging:t0], axis=0)
 		else:
@@ -367,64 +351,33 @@ class SnapshotView(QQuickPaintedItem):
 		painter.drawImage(0, 0, img)
 		
 
-class AnalysisVisualization(QQuickPaintedItem):
+class DifferenceOverlayImage(QQuickPaintedItem):
+	
+	changed = pyqtSignal()
+	
 	def __init__(self, parent=None):
 		QQuickPaintedItem.__init__(self, parent)
-		self._analyzer = None
-		
-	@pyqtProperty('QVariant')
-	def analyzer(self):
-		return self._analyzer
-	@analyzer.setter
-	def analyzer(self, val):
-		self._analyzer = val
-		if val:
-			self._analyzer.analysisComplete.connect(self.update)
-
-
-class DifferenceOverlayImage(AnalysisVisualization):
-	def __init__(self, parent=None):
-		AnalysisVisualization.__init__(self, parent)
 		self._frame = 0
 		self._overlay_treshold = 1
-		self._smooth_radius = 2
-		
-	@pyqtProperty(int)
-	def frame(self):
-		return self._frame
-	@frame.setter
-	def frame(self, val):
-		self._frame = val
-		self.update()
-		
-	@pyqtProperty(float)
-	def treshold(self):
-		return self._overlay_treshold
-	@treshold.setter
-	def treshold(self, val):
-		self._overlay_treshold = val
-		self.update()
-		
-	@pyqtProperty(float)
-	def spatialAveraging(self):
-		return self._smooth_radius
-	@spatialAveraging.setter
-	def spatialAveraging(self, val):
-		self._smooth_radius = val
-		self.update()
-		
-	@pyqtProperty(int)
-	def interval(self):
-		return self.analyzer.interval
-	@interval.setter
-	def interval(self, val):
-		self.analyzer.interval = val
-		self.update()
+		self._smooth_radius = 0
+		self._analyzer = None
+
+	analyzer = map_property('QVariant', "_analyzer", on_modified='analyzer_added')
+	frame = map_property(int, "_frame", on_modified='update')
+	treshold = map_property(float, "_overlay_treshold", on_modified='update')
+	spatialAveraging = map_property(float, "_smooth_radius", on_modified='update')
+	interval = map_property(int, "_interval", on_modified='update')
+	
+	def analyzer_added(self):
+		if self._analyzer: 
+			self._analyzer.parametersChanged.connect(self.update)
 
 	def paint(self, painter):
-		if self.analyzer is None or not self.isVisible(): return
+		self.draw_frame(painter, self._frame)
+		
 	
-		t = self._frame
+	def draw_frame(self, painter, t):
+		if self.analyzer is None or not self.isVisible(): return
 	
 		frame = self.analyzer.analyzeSnapshot(t)
 		if frame is None: return
@@ -446,14 +399,26 @@ class DifferenceOverlayImage(AnalysisVisualization):
 		qimg = QImage(imagestr, image_width, image_height, QImage.Format_ARGB32)
 		painter.drawImage(0, 0, qimg)
 
-class SpectrumImage(AnalysisVisualization):
+
+
+class SpectrumImage(QQuickPaintedItem):
 	def __init__(self, parent=None):
-		AnalysisVisualization.__init__(self, parent)
+		QQuickPaintedItem.__init__(self, parent)
+		self._analyzer = None
 		self._x = 0
 		self._y = 0
 		self._radius = 3
 		self._cutoff = 1
-		
+	
+	@pyqtProperty('QVariant')
+	def analyzer(self):
+		return self._analyzer
+	@analyzer.setter
+	def analyzer(self, val):
+		self._analyzer = val
+		if val:
+			self._analyzer.analysisComplete.connect(self.update)
+	
 	@pyqtProperty(int)
 	def targetX(self):
 		return self._x
@@ -549,8 +514,16 @@ class AnalogSignalPlot(QQuickPaintedItem):
 		
 		x = np.linspace(0, width, len(y))
 		
-		for i in range(y.shape[0]-1):
-			painter.drawLine(x[i], y[i], x[i+1], y[i+1])
+		from PyQt5.QtCore import QPointF
+		from PyQt5.QtGui import QPen
+		points = [QPointF(x[i], y[i]) for i in range(len(x))]
+		pen = QPen()
+		pen.setWidthF(1.5)
+		p = painter
+		p.setRenderHint(QPainter.Antialiasing, True)
+		p.setPen(pen)
+		p.drawPolyline(*points)
+		
 
 
 def create_colortable():
@@ -570,6 +543,33 @@ def to_aligned_qimage(imgarr, format):
 	image_height, image_width = imgarr.shape
 	qimg = QImage(aligned.tobytes(), image_width, image_height, format)
 	return qimg
+
+
+class ImageExporter(QObject):
+	@pyqtSlot(MeasurementData, 'QVariant', int, str)
+	def saveImage(self, data, analysis_overlay, frame, filename):
+		img = data.getVideoSnapshot(frame)
+		if analysis_overlay:
+			img = img.convertToFormat(QImage.Format_RGB32)
+			painter = QPainter(img)
+			analysis_overlay.draw_frame(painter, frame)
+			painter.end()
+		if not img.save(filename):
+			print('Error saving image.')
+	
+	@pyqtSlot(MeasurementData, 'QVariant', 'QVariant', str, bool)
+	def saveImageSeries(self, data, analysis_overlay, frames, folder, frameRange=True):
+		extension = '.tiff'
+		frames = frames.toVariant()
+		if frameRange:
+			frames = range(*(int(s) for s in frames))
+		else:
+			frames = [int(s) for s in frames]
+			
+		for frame in frames:
+			filename = os.path.join(folder, '{:06d}{}'.format(frame, extension))
+			print ('Saving', filename)
+			self.saveImage(data, analysis_overlay, frame, filename)
 
 """
 class VideoExporter(QObject):
@@ -648,7 +648,7 @@ if __name__ == '__main__':
 	qmlRegisterType(DifferenceOverlayImage, "org.dynalyzer", 1, 0, "DifferenceOverlayImage");
 	qmlRegisterType(SpectrumImage, "org.dynalyzer", 1, 0, "SpectrumImage");
 	qmlRegisterType(AnalogSignalPlot, "org.dynalyzer", 1, 0, "AnalogSignalPlot");
-	#qmlRegisterType(VideoExporter, "org.dynalyzer", 1, 0, "VideoExporter");
+	qmlRegisterType(ImageExporter, "org.dynalyzer", 1, 0, "ImageExporter");
 		
 	engine = QQmlApplicationEngine()
 		
