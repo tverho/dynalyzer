@@ -133,30 +133,6 @@ def get_video_filenames(folder):
 	result.sort()
 	return result
 
-
-def spectrogram(section, nperseg, step, framerate=1):
-	nframes, ny, nx = section.shape
-	ntransforms = (nframes-nperseg)//step
-	nperseg += nperseg%2
-	window = signal.get_window(('tukey', 0.25), nperseg)
-	
-	result = np.zeros([ntransforms, nperseg//2 + 1, ny, nx], dtype="float32")
-	
-	# shape: (x, y, t)
-	transposed = section.transpose()
-	
-	for i in range(ntransforms):
-		segment = transposed[:,:, i*step:i*step+nperseg]
-		segment = signal.detrend(segment) * window
-		temp = np.fft.rfft(segment)
-		temp = temp.transpose()
-		temp *= np.conjugate(temp)
-		result[i,:,:,:] = temp.real
-		
-	
-	freqs = np.fft.fftfreq(nperseg, 1/framerate)
-	
-	return result, freqs
 	
 
 def read_analog_data(filename):
@@ -231,52 +207,6 @@ class MeasurementData(QObject):
 		imgdata = self.video_data[frameindex]
 		qimg = to_aligned_qimage(imgdata, QImage.Format_Grayscale8)
 		return qimg
-
-
-class FourierAnalyzer(QObject):
-	
-	analysisComplete = pyqtSignal()
-	
-	def __init__(self, parent=None):
-		QObject.__init__(self, parent)
-		
-		self._data = None
-		self.analysis = None
-		self.t0 = None
-		self.x0 = None
-		self.y0 = None
-		self.frequencies = None
-		self.max_value = None
-		self.analysis_window = 200
-		self.analysis_step = 100
-	
-	@pyqtProperty(MeasurementData)
-	def measurementData(self):
-		return self._data
-	@measurementData.setter
-	def measurementData(self, val):
-		self._data = val
-	
-	@pyqtSlot(int, int, int, int, int, int)
-	def analyze(self, x, y, t, width, height, duration):
-		
-		
-		print('Analyzing...')
-		print('Reading input data')
-		section = self._data.video_data[t:t+duration, y:y+height, x:x+width]
-		print('Calculating')
-		analysis, f = spectrogram(section, self.analysis_window, self.analysis_step, self._data.framerate)
-		
-		self.analysisComplete.emit()
-		print('Done.')
-		print ('Min freq:', f[1])
-		
-		self.analysis = analysis
-		self.t0 = t
-		self.x0 = x
-		self.y0 = y
-		self.frequencies = f[1:]
-		self.max_value = self.analysis.max()
 
 
 class DifferenceAnalyzer(QObject):
@@ -399,89 +329,6 @@ class DifferenceOverlayImage(QQuickPaintedItem):
 		qimg = QImage(imagestr, image_width, image_height, QImage.Format_ARGB32)
 		painter.drawImage(0, 0, qimg)
 
-
-
-class SpectrumImage(QQuickPaintedItem):
-	def __init__(self, parent=None):
-		QQuickPaintedItem.__init__(self, parent)
-		self._analyzer = None
-		self._x = 0
-		self._y = 0
-		self._radius = 3
-		self._cutoff = 1
-	
-	@pyqtProperty('QVariant')
-	def analyzer(self):
-		return self._analyzer
-	@analyzer.setter
-	def analyzer(self, val):
-		self._analyzer = val
-		if val:
-			self._analyzer.analysisComplete.connect(self.update)
-	
-	@pyqtProperty(int)
-	def targetX(self):
-		return self._x
-	@targetX.setter
-	def targetX(self, val):
-		self._x = val
-		self.update()
-	
-	@pyqtProperty(int)
-	def targetY(self):
-		return self._y
-	@targetY.setter
-	def targetY(self, val):
-		self._y = val
-		self.update()
-	
-	@pyqtProperty(int)
-	def radius(self):
-		return self._radius
-	@radius.setter
-	def radius(self, va):
-		self._radius = val
-		self.update()
-	
-	@pyqtProperty(float)
-	def valueCutoff(self):
-		return self._cutoff
-	@valueCutoff.setter
-	def valueCutoff(self, val):
-		self._cutoff = val
-		self.update()
-	
-	def paint(self, painter):
-		if self.analyzer is None or self.analyzer.analysis is None: return
-	
-		analysis = self.analyzer.analysis
-		xindex, yindex = self.targetX, self.targetY
-		
-		if xindex >= analysis.shape[-1]:
-			print('x out of range:' + str(xindex))
-			xindex = 0
-			
-		if yindex >= analysis.shape[-2]:
-			print('y out of range:' + str(yindex))
-			yindex = 0
-		
-		radius = self._radius
-		yind0 = max(yindex-radius,0)
-		yind1 = min(yindex+radius, analysis.shape[-2])
-		xind0 = max(xindex-radius,0)
-		xind1 = min(xindex+radius, analysis.shape[-1])
-		data = analysis[:,1:,yind0:yind1,xind0:xind1]
-		data = data.mean(axis=-1).mean(axis=-1)
-		data = data.transpose()
-		
-		max_value = self.analyzer.max_value*self._cutoff**2
-		normalized = 256 * (data/max_value)**0.5
-		
-		qimg = to_aligned_qimage(normalized, QImage.Format_Indexed8)
-		ct = create_colortable()
-		qimg.setColorTable(ct)
-		qimg = qimg.mirrored().scaled(self.width(), self.height(), transformMode=Qt.SmoothTransformation)
-		painter.drawImage(0, 0, qimg)
 
 
 class AnalogSignalPlot(QQuickPaintedItem):
@@ -643,10 +490,8 @@ if __name__ == '__main__':
 	
 	qmlRegisterType(MeasurementData, "org.dynalyzer", 1, 0, "MeasurementData");
 	qmlRegisterType(DifferenceAnalyzer, "org.dynalyzer", 1, 0, "DifferenceAnalyzer");
-	qmlRegisterType(FourierAnalyzer, "org.dynalyzer", 1, 0, "FourierAnalyzer");
 	qmlRegisterType(SnapshotView, "org.dynalyzer", 1, 0, "SnapshotView");
 	qmlRegisterType(DifferenceOverlayImage, "org.dynalyzer", 1, 0, "DifferenceOverlayImage");
-	qmlRegisterType(SpectrumImage, "org.dynalyzer", 1, 0, "SpectrumImage");
 	qmlRegisterType(AnalogSignalPlot, "org.dynalyzer", 1, 0, "AnalogSignalPlot");
 	qmlRegisterType(ImageExporter, "org.dynalyzer", 1, 0, "ImageExporter");
 		

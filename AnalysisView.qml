@@ -19,48 +19,13 @@ ColumnLayout {
  				color: "transparent"
 				property int frame: navigator.curFrame
 				property real scaleFactor: Math.min(width/measurementData.image_width, height/measurementData.image_height)
-				
-				property int selectionX
-				property int selectionY
-				property int selectionWidth
-				property int selectionHeight
-				
+								
 				SnapshotView {
 					anchors.fill: parent
 					measurementData: measurementData
 					frame: parent.frame
 					scale: parent.scaleFactor
 					transformOrigin: Item.TopLeft
-				}
-				
-				Rectangle {
-					id: selectionRect
-					x: cameraView.selectionX *cameraView.scaleFactor
-					y: cameraView.selectionY *cameraView.scaleFactor
-					width: cameraView.selectionWidth *cameraView.scaleFactor
-					height: cameraView.selectionHeight *cameraView.scaleFactor
-					color: "transparent"
-					border.width: 2
-					border.color: "blue"
-				}
-				
-				MouseArea {
-					anchors.fill: parent
-					acceptedButtons: Qt.RightButton
-					
-					onPressed: {
-						cameraView.selectionX = mouse.x / cameraView.scaleFactor;
-						cameraView.selectionY = mouse.y / cameraView.scaleFactor;
-						cameraView.selectionY -= cameraView.selectionY % 8;
-						cameraView.selectionWidth = 0;
-						cameraView.selectionHeight = 0;
-					}
-					
-					onPositionChanged: if (containsMouse) {
-						cameraView.selectionWidth = mouse.x/cameraView.scaleFactor - cameraView.selectionX;
-						cameraView.selectionHeight = mouse.y/cameraView.scaleFactor - cameraView.selectionY;
-						cameraView.selectionHeight -= cameraView.selectionHeight % 8;
-					}
 				}
 				
 				DifferenceOverlayImage {
@@ -74,66 +39,7 @@ ColumnLayout {
 					scale: cameraView.scaleFactor
 					transformOrigin: Item.TopLeft
 				}
-			
-				Rectangle {
-					id: analyzedRegion
-					visible: false
-					color: "#66000000"
-					property int dataX
-					property int dataY
-					property int dataWidth
-					property int dataHeight
-					property int cursorX: cross.x / scale
-					property int cursorY: cross.y / scale
-					x: dataX * cameraView.scaleFactor
-					y: dataY * cameraView.scaleFactor
-					width: dataWidth * cameraView.scaleFactor
-					height: dataHeight * cameraView.scaleFactor
-					
-					Item {
-						id: cross
-						
-						Rectangle {
-							x: -3
-							width: 8
-							height: 2
-						}
-						Rectangle {
-							y: -3
-							height: 8
-							width: 2
-						}
-					}
-					
-					MouseArea {
-						width: parent.width - 1
-						height: parent.height - 1
-						acceptedButtons: Qt.LeftButton
-						
-						onPressed: {
-							cross.x = mouse.x;
-							cross.y = mouse.y;
-						}
-						onPositionChanged: {
-							if (containsMouse) {
-								cross.x = mouse.x;
-								cross.y = mouse.y;
-							}
-						}
-						
-					}
-					
-					function set() {
-						visible = true;
-						dataX = cameraView.selectionX;
-						dataY = cameraView.selectionY;
-						dataWidth = cameraView.selectionWidth;
-						dataHeight = cameraView.selectionHeight;
-					}
-				}
 			}
-			
-			
 		}
 		
 		ColumnLayout {
@@ -219,25 +125,6 @@ ColumnLayout {
 			}
 			
 			
-			Button {
-				text: "Analyze"
-				enabled: cameraView.selectionWidth > 0 && cameraView.selectionHeight > 0 && 
-					navigator.selectionEnd > navigator.selectionStart
-				
-				onClicked: {
-					var x = cameraView.selectionX;
-					var y = cameraView.selectionY;
-					var width = cameraView.selectionWidth;
-					var height = cameraView.selectionHeight;
-					var tstart = navigator.selectionStart;
-					var twindow = navigator.selectionEnd - tstart;
-					fourierAnalyzer.analyze(x, y, tstart, width, height, twindow);
-					spectrumPane.visible = true;
-					analyzedRegion.set();
-					analyzedInterval.set();
-					
-				}
-			}
 
 			Button {
 				text: "Save image"
@@ -252,9 +139,6 @@ ColumnLayout {
 					onAccepted: {
 						console.log(propertiesPane.toJSON());
 						var filepath = (fileUrl+'').replace('file://', '')
-						/*cameraView.grabToImage(function(image) {
-							image.saveToFile(filepath);
-						});*/
 						
 						imageExporter.saveImage(measurementData, diffOverlayImage, navigator.curFrame, filepath)
 						folder = folder; // Won't remember it otherwise!
@@ -299,28 +183,6 @@ ColumnLayout {
 				return JSON.stringify(pars);
 			}
 		}
-		
-		ColumnLayout {
-			id: spectrumPane
-			visible: false
-			
-			SpectrumImage {
-				id:fourierImage
-				width: 400
-				height: 300
-				analyzer: fourierAnalyzer
-				valueCutoff: cutoffSlider.value
-				targetX: analyzedRegion.cursorX / cameraView.scaleFactor
-				targetY: analyzedRegion.cursorY / cameraView.scaleFactor
-			}
-			
-			Slider {
-				id: cutoffSlider
-				visible: fourierImage.visible
-				value: .25
-				minimumValue: 0.0001
-			}
-		}
 	}
 	
 	ColumnLayout {
@@ -332,10 +194,7 @@ ColumnLayout {
 		
 		property int selectionStart: 0
 		property int selectionEnd: 0
-		
-		property bool curFrameAnalyzed: curFrame >= analyzedInterval.analysisStart && 
-				curFrame <= analyzedInterval.analysisEnd
-		
+				
 		function setFrame(frame) {
 			if (frame < 0) curFrame = 0;
 			else if (frame > numFrames-1) curFrame = numFrames - 1;
@@ -374,21 +233,6 @@ ColumnLayout {
 				opacity: 0.5
 				x: navigator.selectionStart * slider.width / navigator.numFrames
 				width: (navigator.selectionEnd - navigator.selectionStart) * slider.width / navigator.numFrames
-			}
-			
-			Rectangle {
-				id: analyzedInterval
-				height: parent.height
-				color: "#88000000"
-				property int analysisStart
-				property int analysisEnd
-				x: analysisStart * slider.width / navigator.numFrames
-				width: (analysisEnd - analysisStart) * slider.width / navigator.numFrames
-				
-				function set() {
-					analysisStart = navigator.selectionStart;
-					analysisEnd = navigator.selectionEnd;
-				}
 			}
 			
 			MouseArea {
@@ -460,12 +304,7 @@ ColumnLayout {
 			}
 		}
 	}
-	
-	FourierAnalyzer {
-		id: fourierAnalyzer
-		measurementData: measurementData
-	}
-	
+		
 	DifferenceAnalyzer {
 		id: diffAnalyzer
 		measurementData: measurementData
