@@ -189,7 +189,10 @@ class MeasurementData(QObject):
 	
 	@pyqtProperty(int, notify=folderLoaded)
 	def nFrames(self):
-		return self.video_data.shape[0]
+		if self.video_data:
+			return self.video_data.shape[0]
+		else:
+			return 0
 	
 	@pyqtProperty(int, notify=folderLoaded)
 	def framerate(self):
@@ -221,28 +224,40 @@ class DifferenceAnalyzer(QObject):
 		self._temporal_averaging = None
 		self._black_treshold = 20
 		self._relative_mode = True
+		self._fast_averaging = True
     
 	measurementData = map_property(MeasurementData, '_data', notify='parametersChanged')
 	interval = map_property(int, '_interval', notify='parametersChanged')
 	temporalAveraging = map_property(int, '_temporal_averaging', notify='parametersChanged')
 	blackTreshold = map_property(int, '_black_treshold', notify='parametersChanged')
 	relativeMode = map_property(bool, '_relative_mode', notify='parametersChanged')
+	fastTemporalAveraging = map_property(bool, '_fast_averaging', notify='parametersChanged') 
 
 	def analyzeSnapshot(self, t):
 		t_averaging = self._temporal_averaging
 		t0 = t - self._interval
+		interval = self._interval
 		if t0-t_averaging < 0: return None
 		
 		video_data = self._data.video_data
 		
 		if t_averaging:
-			cur = np.mean(video_data[t-t_averaging:t], axis=0)
-			prev = np.mean(video_data[t0-t_averaging:t0], axis=0)
+			if self._fast_averaging:
+				cur = np.mean(video_data[t-t_averaging:t], axis=0)
+				prev = np.mean(video_data[t0-t_averaging:t0], axis=0)
+				difference = np.abs(cur - prev)
+				print('fast')
+			else:
+				datablock = np.array(video_data[t0-t_averaging:t], dtype=int)
+				cur = datablock[-t_averaging:]
+				prev = datablock[-interval-t_averaging:-interval]
+				difference = np.mean(np.abs(cur-prev), axis=0)
+				print('slow')
+			
 		else:
 			cur = np.array(video_data[t], dtype=int)
 			prev = video_data[t0]
-		
-		difference = np.abs(cur - prev)
+			difference = np.abs(cur - prev)
 		
 		zeros = np.where(video_data[t] < self._black_treshold)
 		difference[zeros] = 0
@@ -501,6 +516,7 @@ if __name__ == '__main__':
 		path = QUrl(sys.argv[1])
 		engine.rootContext().setContextProperty("loadpath", path)
 	
-	engine.load('dynalyzer.qml')
+	dir_path = os.path.dirname(__file__)
+	engine.load(os.path.join(dir_path, 'dynalyzer.qml'))
 	app.exec_()
 

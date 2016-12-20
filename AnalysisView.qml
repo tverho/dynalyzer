@@ -119,6 +119,12 @@ ColumnLayout {
 			}
 			
 			CheckBox {
+				id: fastTemporalAveragingCheckbox
+				text: "Fast temporal averaging"
+				checked: true
+			}
+			
+			CheckBox {
 				id: relativeModeCheckbox
 				text: "Relative mode"
 				checked: true
@@ -190,7 +196,7 @@ ColumnLayout {
 		Layout.fillWidth: true
 		
 		property int curFrame: 0
-		property int numFrames: measurementData && measurementData.ready? measurementData.nFrames : 0
+		property int numFrames: measurementData? measurementData.nFrames : 0
 		
 		property int selectionStart: 0
 		property int selectionEnd: 0
@@ -277,15 +283,22 @@ ColumnLayout {
 				onClicked: navigator.setFrame(navigator.curFrame+1)
 			}
 			
+			Label {text: "Play speed (f/s)"}
+			
+			ValueField {
+				id: playSpeedField
+				text: "10"
+				validator: IntValidator {bottom: 0}
+				implicitWidth: 60
+			}
+			
 			Button {
-				text: "play"
+				text: playTimer.running? "stop" : "play"
 				onClicked: {
 					if (playTimer.running) {
 						playTimer.stop();
-						text = "start";
 					} else {
 						playTimer.start();
-						text = "stop"
 					}
 					
 				}
@@ -294,7 +307,16 @@ ColumnLayout {
 					id: playTimer
 					interval: 100
 					repeat: true
-					onTriggered: navigator.curFrame += 10
+					property real step: playSpeedField.value/1000 * interval
+					
+					onTriggered: {
+						if (navigator.curFrame + step < navigator.numFrames) {
+							navigator.curFrame += step;
+						}
+						else {
+							stop();
+						}
+					}
 				}
 			}
 			
@@ -313,6 +335,7 @@ ColumnLayout {
 		temporalAveraging: temporalAveragingField.value
 		blackTreshold: blackTresholdField.value
 		relativeMode: relativeModeCheckbox.checked
+		fastTemporalAveraging: fastTemporalAveragingCheckbox.checked
 	}
 	
 	MeasurementData {
