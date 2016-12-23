@@ -140,7 +140,7 @@ ColumnLayout {
 				FileDialog {
 					id: saveImageDialog
 					title: "Save image"
-					nameFilters: [ "Image files (*.jpg *.png)", "All files (*)" ]
+					nameFilters: [ "Image files (*.png *.tiff *.jpg)", "All files (*)" ]
 					selectExisting: false
 					onAccepted: {
 						console.log(propertiesPane.toJSON());

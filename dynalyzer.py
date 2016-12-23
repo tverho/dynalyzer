@@ -246,13 +246,11 @@ class DifferenceAnalyzer(QObject):
 				cur = np.mean(video_data[t-t_averaging:t], axis=0)
 				prev = np.mean(video_data[t0-t_averaging:t0], axis=0)
 				difference = np.abs(cur - prev)
-				print('fast')
 			else:
 				datablock = np.array(video_data[t0-t_averaging:t], dtype=int)
 				cur = datablock[-t_averaging:]
 				prev = datablock[-interval-t_averaging:-interval]
 				difference = np.mean(np.abs(cur-prev), axis=0)
-				print('slow')
 			
 		else:
 			cur = np.array(video_data[t], dtype=int)
@@ -421,7 +419,7 @@ class ImageExporter(QObject):
 	
 	@pyqtSlot(MeasurementData, 'QVariant', 'QVariant', str, bool)
 	def saveImageSeries(self, data, analysis_overlay, frames, folder, frameRange=True):
-		extension = '.tiff'
+		extension = '.png'
 		frames = frames.toVariant()
 		if frameRange:
 			frames = range(*(int(s) for s in frames))
