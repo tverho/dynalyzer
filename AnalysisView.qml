@@ -46,6 +46,16 @@ ColumnLayout {
 			id: propertiesPane
 			property double labelWidth: 180
 			
+			property var json: JSON.stringify({
+					interval: intervalField.value,
+					treshold: overlayTresholdField.value,
+					temporalAveraging: temporalAveragingField.value,
+					spatialAveraging: spatialAveragingField.value,
+					blackTreshold: blackTresholdField.value,
+					fastTemporalAveraging: fastTemporalAveragingCheckbox.checked,
+					relativeMode: relativeModeCheckbox.checked
+				})
+			
 			CheckBox {
 				id: overlayCheckbox
 				text: "Overlay"
@@ -143,10 +153,11 @@ ColumnLayout {
 					nameFilters: [ "Image files (*.png *.tiff *.jpg)", "All files (*)" ]
 					selectExisting: false
 					onAccepted: {
-						console.log(propertiesPane.toJSON());
+						console.log("Parameters for the saved image:");
+						console.log(propertiesPane.json);
 						var filepath = (fileUrl+'').replace('file://', '')
 						
-						imageExporter.saveImage(measurementData, diffOverlayImage, navigator.curFrame, filepath)
+						exporter.saveImage(measurementData, diffOverlayImage, navigator.curFrame, filepath)
 						folder = folder; // Won't remember it otherwise!
 					}
 				}
@@ -168,25 +179,34 @@ ColumnLayout {
 					
 					onAccepted: {
 						var path = (folder+'').replace('file://', '');
-						imageExporter.saveImageSeries(measurementData, diffOverlayImage, frames, path, range);
+						exporter.saveImageSeries(measurementData, diffOverlayImage, frames, path, range);
+						console.log("Parameters for the saved images:");
+						console.log(propertiesPane.json);
 					}
 				}
+			}
+			Button {
+				text: "Save analog signals"
 				
+				onClicked: saveSignalsDialog.open()
+
+				FileDialog {
+					id: saveSignalsDialog
+					title: "Save image"
+					nameFilters: [ "ASCII files (*.txt)", "All files (*)" ]
+					selectExisting: false
+					onAccepted: {
+						var filepath = (fileUrl+'').replace('file://', '')
+						
+						exporter.saveAnalogSignals(measurementData, filepath)
+						folder = folder; // Won't remember it otherwise!
+					}
+				}
 			}
 			
-			ImageExporter {
-				id: imageExporter
-			}
-						
-			function toJSON() {
-				var pars = {
-					interval: intervalField.value,
-					treshold: overlayTresholdField.value,
-					temporalAveraging: temporalAveragingField.value,
-					spatialAveraging: spatialAveragingField.value,
-					blackTreshold: blackTresholdField.value
-				};
-				return JSON.stringify(pars);
+			
+			Exporter {
+				id: exporter
 			}
 		}
 	}
@@ -209,7 +229,7 @@ ColumnLayout {
 		
 		Rectangle {
 			id: slider
-			Layout.minimumHeight: 50
+			Layout.minimumHeight: 100
 			Layout.fillWidth: true
 			color: "white"
 			border.color: "black"

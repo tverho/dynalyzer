@@ -22,6 +22,7 @@ ApplicationWindow {
 		var component = Qt.createComponent("AnalysisView.qml");
 		var tab = tabview.addTab(dataPath.toString().split('/').pop());
 		component.createObject(tab, {"folder": dataPath});
+		tab.active = true;
 	}
 	
 	Component.onCompleted: {

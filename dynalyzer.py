@@ -124,6 +124,9 @@ def parse_config(filename, rotate=True):
 	#nframes = int( root.find(".//*[Name='Frames to read']/Val").text )
 	config.framerate = float( root.find(".//*[Name='Frames per second']/Val").text )
 	config.analog_samplerate = float( root.find(".//*[Name='Sample Rate (S/s)']/Val").text )
+	config.force_scale = float( root.find(".//*[Name='Force Scale (N/v)']/Val").text )
+	config.displacement_scale = float( root.find(".//*[Name='Strain Scale (mm/V)']/Val").text )
+	
 	
 	return config
 
@@ -199,6 +202,10 @@ class MeasurementData(QObject):
 		return self.config.framerate
 	
 	@pyqtProperty(int, notify=folderLoaded)
+	def analogSamplerate(self):
+		return self.config.analog_samplerate
+	
+	@pyqtProperty(int, notify=folderLoaded)
 	def image_width(self):
 		return self.video_data.shape[2]
 	
@@ -257,12 +264,14 @@ class DifferenceAnalyzer(QObject):
 			prev = video_data[t0]
 			difference = np.abs(cur - prev)
 		
-		zeros = np.where(video_data[t] < self._black_treshold)
-		difference[zeros] = 0
+		valid = np.where(video_data[t] > self._black_treshold)
 		
+		result = np.zeros_like(difference)
 		if self._relative_mode:
-			difference = difference / video_data[t] * 100
-		return difference
+			result[valid] = 100 * difference[valid] / video_data[t][valid]
+		else:
+			result[valid] = difference[valid]
+		return result
 
 class SnapshotView(QQuickPaintedItem):
 	
@@ -356,6 +365,26 @@ class AnalogSignalPlot(QQuickPaintedItem):
 	def measurementData(self, val):
 		self._data = val
 	
+	def tidy_signal(self, y):
+		
+		sorted_y = np.sort(y)
+		
+		# If data is mostly negative, switch sign
+		seventy_percent = int(len(y)*.8)
+		if sorted_y[seventy_percent] < 0:
+			y = -y
+			sorted_y = np.sort(y)
+		
+		# Let 1% of data be negative
+		one_percent = int(len(y)*.01)
+		y = y - sorted_y[one_percent]
+			
+		# Scale to 0 ... 1 ignoring first second
+		first_second = int(1*self._data.analogSamplerate)
+		y /= np.max(y[first_second:])
+		
+		return y
+	
 	def paint(self, painter):
 		if self._data is None: return
 		signals = self._data.analog_signals
@@ -363,19 +392,22 @@ class AnalogSignalPlot(QQuickPaintedItem):
 		height = self.height()
 		
 		duration = self._data.nFrames/self._data.framerate
-		nsamples = int(duration*self._data.config.analog_samplerate)
+		nsamples = int(duration*self._data.analogSamplerate)
 
 		y = signals[0,:nsamples]
-		y -= np.min(y)
-
-		y /= np.max(y[len(y)//4:])
+		y = self.tidy_signal(y)
 		y = 1 - y
 		y *= height
-		
+				
 		x = np.linspace(0, width, len(y))
 		
 		from PyQt5.QtCore import QPointF
 		from PyQt5.QtGui import QPen
+		q = int(len(x) / width)
+		if q > 1:
+			# too much data
+			x = x[::q]
+			y = y[::q]
 		points = [QPointF(x[i], y[i]) for i in range(len(x))]
 		pen = QPen()
 		pen.setWidthF(1.5)
@@ -405,7 +437,7 @@ def to_aligned_qimage(imgarr, format):
 	return qimg
 
 
-class ImageExporter(QObject):
+class Exporter(QObject):
 	@pyqtSlot(MeasurementData, 'QVariant', int, str)
 	def saveImage(self, data, analysis_overlay, frame, filename):
 		img = data.getVideoSnapshot(frame)
@@ -430,6 +462,29 @@ class ImageExporter(QObject):
 			filename = os.path.join(folder, '{:06d}{}'.format(frame, extension))
 			print ('Saving', filename)
 			self.saveImage(data, analysis_overlay, frame, filename)
+			
+	@pyqtSlot(MeasurementData, str)
+	def saveAnalogSignals(self, data, filename):
+		signals = data.analog_signals.T
+		framerate = data.framerate
+		samplerate = data.analogSamplerate
+		nsamples = signals.shape[0]
+		config = data.config
+		
+		displacement = signals[:,1] * config.displacement_scale
+		load = signals[:,0] * config.force_scale
+		
+		outdata = np.zeros((nsamples, 4))
+		outdata[:, 0] = np.arange(nsamples) / samplerate
+		outdata[:, 1] = np.arange(nsamples) * (framerate/samplerate)
+		outdata[:, 2] = displacement
+		outdata[:, 3] = load
+		
+		header = 'time(s) video_frame displacement(m) load(N)'
+		format = ('%1.8e', '%8d', '%1.8e', '%1.8e')
+		np.savetxt(filename, outdata, fmt=format, header = header)
+		
+		
 
 """
 class VideoExporter(QObject):
@@ -506,7 +561,7 @@ if __name__ == '__main__':
 	qmlRegisterType(SnapshotView, "org.dynalyzer", 1, 0, "SnapshotView");
 	qmlRegisterType(DifferenceOverlayImage, "org.dynalyzer", 1, 0, "DifferenceOverlayImage");
 	qmlRegisterType(AnalogSignalPlot, "org.dynalyzer", 1, 0, "AnalogSignalPlot");
-	qmlRegisterType(ImageExporter, "org.dynalyzer", 1, 0, "ImageExporter");
+	qmlRegisterType(Exporter, "org.dynalyzer", 1, 0, "Exporter");
 		
 	engine = QQmlApplicationEngine()
 		
