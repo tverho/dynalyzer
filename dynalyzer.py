@@ -1,6 +1,5 @@
 import numpy as np
 import os
-#from matplotlib import pyplot
 import xml.etree.ElementTree as ET
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal, Qt, QUrl
 from PyQt5.QtGui import QImage, QTransform, QColor, QPainter
@@ -156,6 +155,21 @@ def read_analog_data(filename):
 	infile.close()
 	return np.array([signalx, signaly])
 
+def tidy_analog_signal(y):
+	sorted_y = np.sort(y)
+	
+	# If data is mostly negative, switch sign
+	seventy_percent = int(len(y)*.8)
+	if sorted_y[seventy_percent] < 0:
+		y = -y
+		sorted_y = np.sort(y)
+	
+	# Let 1% of data be negative
+	one_percent = int(len(y)*.01)
+	y = y - sorted_y[one_percent]
+		
+		
+	return y
 
 
 ### GUI related classes ###
@@ -365,37 +379,23 @@ class AnalogSignalPlot(QQuickPaintedItem):
 	def measurementData(self, val):
 		self._data = val
 	
-	def tidy_signal(self, y):
-		
-		sorted_y = np.sort(y)
-		
-		# If data is mostly negative, switch sign
-		seventy_percent = int(len(y)*.8)
-		if sorted_y[seventy_percent] < 0:
-			y = -y
-			sorted_y = np.sort(y)
-		
-		# Let 1% of data be negative
-		one_percent = int(len(y)*.01)
-		y = y - sorted_y[one_percent]
-			
-		# Scale to 0 ... 1 ignoring first second
-		first_second = int(1*self._data.analogSamplerate)
-		y /= np.max(y[first_second:])
-		
-		return y
-	
 	def paint(self, painter):
-		if self._data is None: return
-		signals = self._data.analog_signals
+		data = self._data
+		if data is None: return
+		signals = data.analog_signals
 		width = self.width()
 		height = self.height()
 		
-		duration = self._data.nFrames/self._data.framerate
-		nsamples = int(duration*self._data.analogSamplerate)
+		duration = data.nFrames/data.framerate
+		nsamples = int(duration*data.analogSamplerate)
 
 		y = signals[0,:nsamples]
-		y = self.tidy_signal(y)
+		y = tidy_analog_signal(y)
+		
+		# Scale to 0 ... 1 ignoring first second
+		first_second = int(1*data.analogSamplerate)
+		y /= np.max(y[first_second:])
+		
 		y = 1 - y
 		y *= height
 				
@@ -440,28 +440,46 @@ def to_aligned_qimage(imgarr, format):
 class Exporter(QObject):
 	@pyqtSlot(MeasurementData, 'QVariant', int, str)
 	def saveImage(self, data, analysis_overlay, frame, filename):
-		img = data.getVideoSnapshot(frame)
-		if analysis_overlay:
-			img = img.convertToFormat(QImage.Format_RGB32)
-			painter = QPainter(img)
-			analysis_overlay.draw_frame(painter, frame)
-			painter.end()
+		img = self.get_frame_image(data, analysis_overlay, frame)
 		if not img.save(filename):
 			print('Error saving image.')
 	
-	@pyqtSlot(MeasurementData, 'QVariant', 'QVariant', str, bool)
-	def saveImageSeries(self, data, analysis_overlay, frames, folder, frameRange=True):
+	@pyqtSlot(MeasurementData, 'QVariant', 'QVariant', str, bool, bool)
+	def saveImageSeries(self, data, analysis_overlay, frames, folder, frameRange=True, addAnalogSignalPlot=False):
 		extension = '.png'
 		frames = frames.toVariant()
 		if frameRange:
 			frames = range(*(int(s) for s in frames))
 		else:
 			frames = [int(s) for s in frames]
+		
+		if addAnalogSignalPlot:
+			width = data.image_width
+			plot_height = int(data.image_height * 0.25)
+			plot, plot_area = self.get_analog_signals_plot(data, width, plot_height)
+			master_image = QImage(width, data.image_height + plot_height, QImage.Format_ARGB32)
+			painter = QPainter(master_image)
 			
 		for frame in frames:
 			filename = os.path.join(folder, '{:06d}{}'.format(frame, extension))
 			print ('Saving', filename)
-			self.saveImage(data, analysis_overlay, frame, filename)
+			snapshot = self.get_frame_image(data, analysis_overlay, frame)
+			if addAnalogSignalPlot:
+				painter.drawImage(0,0, snapshot)
+				painter.drawImage(0, data.image_height, plot)
+				cursor_x = plot_area[0] + frame/data.nFrames * plot_area[2]
+				cursor_y1 = data.image_height + plot_area[1]
+				cursor_y2 = data.image_height + plot_area[1] + plot_area[3]
+				painter.setPen(QColor(0,0,255))
+				painter.drawLine(cursor_x, cursor_y1, cursor_x, cursor_y2)
+				img = master_image
+			else:
+				img = snapshot
+			if not img.save(filename):
+					print('Error saving image.')
+		
+		if addAnalogSignalPlot:
+			painter.end()
 			
 	@pyqtSlot(MeasurementData, str)
 	def saveAnalogSignals(self, data, filename):
@@ -484,6 +502,45 @@ class Exporter(QObject):
 		format = ('%1.8e', '%8d', '%1.8e', '%1.8e')
 		np.savetxt(filename, outdata, fmt=format, header = header)
 		
+	def get_frame_image(self, data, analysis_overlay, frame):
+		img = data.getVideoSnapshot(frame)
+		if analysis_overlay:
+			img = img.convertToFormat(QImage.Format_RGB32)
+			painter = QPainter(img)
+			analysis_overlay.draw_frame(painter, frame)
+			painter.end()
+		return img
+	
+	def get_analog_signals_plot(self, data, width, height):
+		# Fancier analog signal plot with Matplotlib
+		import matplotlib
+		matplotlib.use('Agg')
+		from matplotlib import pyplot
+		
+		signals = data.analog_signals
+		
+		duration = data.nFrames/data.framerate
+		nsamples = int(duration*data.analogSamplerate)
+
+		y = signals[0,:nsamples]
+		y = tidy_analog_signal(y)
+		
+		t = np.arange(0, len(y)) / data.analogSamplerate
+		
+		pyplot.clf()
+		fig = pyplot.gcf()
+		dpi = fig.get_dpi()
+		fig.set_size_inches(width / dpi, height / dpi)
+		pyplot.plot(t, y, 'r-')
+		pyplot.ylim(ymin=0)
+		pyplot.xlabel('Time (s)')
+		pyplot.ylabel('Load (N)')
+		left, top, right, bottom = .15, .1, .1, .2
+		pyplot.subplots_adjust(left=left, top=1-top, right=1-right, bottom=bottom)
+		fig.canvas.draw()
+		img = QImage(fig.canvas.buffer_rgba(), width, height, QImage.Format_ARGB32)
+		plot_area = (left*width, top*height, (1-left-right)*width, (1-top-bottom)*height)
+		return img, plot_area
 		
 
 """

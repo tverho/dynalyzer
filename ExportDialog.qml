@@ -11,6 +11,7 @@ Dialog {
 	property bool range: rangeButton.checked
 	property var frames: range? [startField.text, endField.text, stepField.text] : listField.text.split(',')
 	property url folder: folderDialog.folder
+	property bool addAnalogSignalPlot: analogSignalPlotCheckbox.checked
 	
 	standardButtons: StandardButton.Save | StandardButton.Cancel
 	
@@ -52,6 +53,11 @@ Dialog {
 					text: "10"
 					validator: IntValidator {bottom: 0}
 				}
+			}
+			CheckBox {
+				id: analogSignalPlotCheckbox
+				text: "Add force-time plot"
+				checked: false
 			}
 		}
 		RadioButton {

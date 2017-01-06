@@ -179,7 +179,7 @@ ColumnLayout {
 					
 					onAccepted: {
 						var path = (folder+'').replace('file://', '');
-						exporter.saveImageSeries(measurementData, diffOverlayImage, frames, path, range);
+						exporter.saveImageSeries(measurementData, diffOverlayImage, frames, path, range, addAnalogSignalPlot);
 						console.log("Parameters for the saved images:");
 						console.log(propertiesPane.json);
 					}
