@@ -532,7 +532,10 @@ class Exporter(QObject):
 		dpi = fig.get_dpi()
 		fig.set_size_inches(width / dpi, height / dpi)
 		pyplot.plot(t, y, 'r-')
-		pyplot.ylim(ymin=0)
+		
+		first_second = int(1*data.analogSamplerate)
+		pyplot.ylim(ymin=0, ymax=np.max(y[first_second:]))
+		pyplot.xlim(xmin=t[0], xmax=t[-1])
 		pyplot.xlabel('Time (s)')
 		pyplot.ylabel('Load (N)')
 		left, top, right, bottom = .15, .1, .1, .2
