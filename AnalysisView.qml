@@ -155,9 +155,8 @@ ColumnLayout {
 					onAccepted: {
 						console.log("Parameters for the saved image:");
 						console.log(propertiesPane.json);
-						var filepath = (fileUrl+'').replace('file://', '')
 						
-						exporter.saveImage(measurementData, diffOverlayImage, navigator.curFrame, filepath)
+						exporter.saveImage(measurementData, diffOverlayImage, navigator.curFrame, fileUrl)
 						folder = folder; // Won't remember it otherwise!
 					}
 				}
@@ -178,8 +177,7 @@ ColumnLayout {
 					id: saveImageSeriesDialog
 					
 					onAccepted: {
-						var path = (folder+'').replace('file://', '');
-						exporter.saveImageSeries(measurementData, diffOverlayImage, frames, path, range, addAnalogSignalPlot);
+						exporter.saveImageSeries(measurementData, diffOverlayImage, frames, folder, range, addAnalogSignalPlot);
 						console.log("Parameters for the saved images:");
 						console.log(propertiesPane.json);
 					}
@@ -196,9 +194,7 @@ ColumnLayout {
 					nameFilters: [ "ASCII files (*.txt)", "All files (*)" ]
 					selectExisting: false
 					onAccepted: {
-						var filepath = (fileUrl+'').replace('file://', '')
-						
-						exporter.saveAnalogSignals(measurementData, filepath)
+						exporter.saveAnalogSignals(measurementData, fileUrl)
 						folder = folder; // Won't remember it otherwise!
 					}
 				}

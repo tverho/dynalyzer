@@ -460,13 +460,17 @@ def to_aligned_qimage(imgarr, format):
 
 class Exporter(QObject):
 	@pyqtSlot(MeasurementData, 'QVariant', int, str)
-	def saveImage(self, data, analysis_overlay, frame, filename):
+	def saveImage(self, data, analysis_overlay, frame, fileurl):
+		url = QUrl(fileurl)
+		filename = url.toLocalFile()
 		img = self.get_frame_image(data, analysis_overlay, frame)
 		if not img.save(filename):
 			print('Error saving image.')
 	
 	@pyqtSlot(MeasurementData, 'QVariant', 'QVariant', str, bool, bool)
-	def saveImageSeries(self, data, analysis_overlay, frames, folder, frameRange=True, addAnalogSignalPlot=False):
+	def saveImageSeries(self, data, analysis_overlay, frames, folder_url, frameRange=True, addAnalogSignalPlot=False):
+		url = QUrl(folder_url)
+		folder = url.toLocalFile()
 		extension = '.png'
 		frames = frames.toVariant()
 		if frameRange:
@@ -503,7 +507,9 @@ class Exporter(QObject):
 			painter.end()
 			
 	@pyqtSlot(MeasurementData, str)
-	def saveAnalogSignals(self, data, filename):
+	def saveAnalogSignals(self, data, fileurl):
+		url = QUrl(fileurl)
+		filename = url.toLocalFile()
 		signals = data.analog_signals.T
 		framerate = data.framerate
 		samplerate = data.analogSamplerate
