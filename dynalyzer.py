@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtQuick import QQuickImageProvider, QQuickPaintedItem
 from PyQt5.QtQml import qmlRegisterType
 from scipy import signal, ndimage
+import colorsys
 
 
 def map_property(type, attrname, notify=None, on_modified=None):
@@ -227,9 +228,24 @@ class MeasurementData(QObject):
 	def image_height(self):
 		return self.video_data.shape[1]
 	
-	def getVideoSnapshot(self, frameindex):
+	def getVideoSnapshot(self, frameindex, contrast=None, brightness=None):
 		imgdata = self.video_data[frameindex]
-		qimg = to_aligned_qimage(imgdata, QImage.Format_Grayscale8)
+		if contrast != None and brightness != None:
+			maxvalue = (255 - brightness)/contrast
+			saturated_pixels = np.where(imgdata > maxvalue)
+			imgdata = imgdata*contrast + brightness
+			imgdata[saturated_pixels] = 255
+		
+		image_height, image_width = imgdata.shape
+		data = np.zeros((image_height, image_width, 4), dtype='u1')
+		data[:,:,0] = imgdata
+		data[:,:,1] = imgdata
+		data[:,:,2] = imgdata
+		data[:,:,3] = 255
+		
+		self.bytes = data.tobytes()
+		qimg = QImage(self.bytes, image_width, image_height, QImage.Format_ARGB32)
+		#qimg = to_aligned_qimage(imgdata, QImage.Format_Grayscale8)
 		return qimg
 
 
@@ -280,7 +296,7 @@ class DifferenceAnalyzer(QObject):
 		
 		valid = np.where(video_data[t] > self._black_treshold)
 		
-		result = np.zeros_like(difference)
+		result = np.zeros_like(difference, dtype=float)
 		if self._relative_mode:
 			result[valid] = 100 * difference[valid] / video_data[t][valid]
 		else:
@@ -352,13 +368,18 @@ class DifferenceOverlayImage(QQuickPaintedItem):
 			frame = ndimage.gaussian_filter(frame, self._smooth_radius)
 	
 		imagearr = np.zeros((frame.shape[0], frame.shape[1], 4), dtype="uint8")
-
-		for i in range(5):
-			treshold = self.treshold * (1 + i*0.5)
-			pixels = np.where(frame > treshold)
-			imagearr[:,:,0][pixels] = (255 - i*40)
-			if i==0: 
-				imagearr[:,:,3][pixels] = 255
+		
+		colortable = np.array([colorsys.hsv_to_rgb(i, 1, 1) for i in np.linspace(0, 1, 256)])
+		def colormap(values, min, max):
+			indices = np.round(255*(values-min)/max).astype(int)
+			indices[indices > 255] = 255
+			colors = colortable[indices]
+			return colors
+        
+		pixels = np.where(frame > self.treshold)
+		colors = colormap(frame[pixels], self.treshold, self.treshold*5)
+		imagearr[:,:,:3][pixels] = 255*colors
+		imagearr[:,:,3][pixels] = 255
 
 		imagestr = imagearr.flatten().tobytes()
 		image_height, image_width = frame.shape
