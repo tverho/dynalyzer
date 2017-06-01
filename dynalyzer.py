@@ -1,13 +1,15 @@
 import numpy as np
 import os
-import xml.etree.ElementTree as ET
+from rawdata import VideoRawData, parse_config, read_analog_data
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtProperty, pyqtSignal, Qt, QUrl
 from PyQt5.QtGui import QImage, QTransform, QColor, QPainter
-from PyQt5.QtWidgets import QApplication
 from PyQt5.QtQuick import QQuickImageProvider, QQuickPaintedItem
 from PyQt5.QtQml import qmlRegisterType
 from scipy import signal, ndimage
-import colorsys
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib import pyplot
+import matplotlib.cm
 
 
 def map_property(type, attrname, notify=None, on_modified=None):
@@ -22,139 +24,6 @@ def map_property(type, attrname, notify=None, on_modified=None):
 	else:
 		return pyqtProperty(type, getter, setter)
 
-class VideoRawData:
-	def __init__(self, folder, config, rotate = True):
-		filenames = get_video_filenames(folder)
-		w, h = config.image_width, config.image_height
-		
-		self.arrays = [self.create_view(f, w, h) for f in filenames]
-		total_nframes = sum(a.shape[0] for a in self.arrays)
-		if rotate:
-			self.shape = (total_nframes, w, h)
-		else:
-			self.shape = (total_nframes, h, w)
-		self.rotate = rotate
-		
-	def create_view(self, filename, width, height):
-		header_size = 4
-		m = np.memmap(filename, dtype='u1', offset=header_size)
-		framesize = width*height
-		filesize = len(m) + header_size
-		nframes = filesize // (framesize+header_size)
-		
-		# Each 8 byte sequence is in reversed order, so create a 4d
-		# array and reverse the last axis to get the bytes in order
-		shape = (nframes, height, width//8, 8)
-		
-		# Use stride tricks to skip the header bytes between frames
-		strides = ((framesize+header_size), width, 8, 1)
-		strided = np.lib.stride_tricks.as_strided(m, strides=strides, shape=shape)
-		view = strided[:,:,:,::-1]
-		return view
-	
-	
-	def __getitem__(self, slices):
-		clean_slices = []
-		unpack_indices = [slice(None), slice(None), slice(None)]
-		try: list(slices)
-		except: slices = list((slices,))
-		
-		for i in range(3):
-			try:
-				slices[i].start
-				clean_slices.append(slices[i])
-			except IndexError:
-				clean_slices.append(slice(None))
-			except AttributeError:
-				# This is an integer index
-				clean_slices.append(slice(slices[i], slices[i]+1))
-				unpack_indices[i] = 0
-		
-		array = self.get_section(*clean_slices)
-		return array[unpack_indices]
-		
-	def get_section(self, tslice, yslice, xslice):
-		start, end, step = tslice.indices(self.shape[0])
-		if self.rotate:
-			start1, end1, step1 = xslice.indices(self.shape[2])
-			start1, end1, step1 = -start1-1, -end1-1, -step1
-			start2, end2, step2 = yslice.indices(self.shape[1])
-		else:
-			start1, end1, step1 = yslice.indices(self.shape[1])
-			start2, end2, step2 = xslice.indices(self.shape[2])
-		
-		rect = (slice(None), slice(start1, end1, step1), slice(start2 // 8, end2 // 8))
-		section = None
-		for arr in self.arrays:
-			if section is not None:
-				if end > arr.shape[0]:
-					section = np.vstack((section, arr[::step][rect]))
-				else:
-					section = np.vstack((section, arr[:end:step][rect]))
-					break
-			
-			elif end <= arr.shape[0]:
-				section = arr[start:end:step][rect]
-				break
-			
-			elif start < arr.shape[0]:
-				section = arr[start::step][rect]
-					
-			start -= arr.shape[0]
-			end -= arr.shape[0]
-		
-		section = section.reshape((section.shape[0], section.shape[1], section.shape[2]*section.shape[3]))
-		if self.rotate:
-			section = section.transpose((0, 2, 1))
-		
-		return section
-
-
-def parse_config(filename, rotate=True):
-	tree = ET.parse(filename)
-	root = tree.getroot()
-
-	class Object(): pass
-	config = Object()
-	
-	width = int( root.find(".//*[Name='Image Width']/Val").text )
-	height = int( root.find(".//*[Name='Image Height']/Val").text )
-	config.image_width = width
-	config.image_height = height
-	#nframes = int( root.find(".//*[Name='Frames to read']/Val").text )
-	config.framerate = float( root.find(".//*[Name='Frames per second']/Val").text )
-	config.analog_samplerate = float( root.find(".//*[Name='Sample Rate (S/s)']/Val").text )
-	config.force_scale = float( root.find(".//*[Name='Force Scale (N/v)']/Val").text )
-	config.displacement_scale = float( root.find(".//*[Name='Strain Scale (mm/V)']/Val").text )
-	
-	
-	return config
-
-def get_video_filenames(folder):
-	files = os.listdir(folder)
-	result = [os.path.join(folder, file) for file in files if file.count('Camera_Data') > 0]
-	result.sort()
-	return result
-
-	
-
-def read_analog_data(filename):
-	infile = open(filename)
-	
-	signalx = np.array([])
-	signaly = np.array([])
-	
-	while True:
-		vals = np.fromfile(infile, dtype='>i4', count=2)
-		if len(vals) < 2: break
-		n1, n2 = vals
-		block = np.fromfile(infile, dtype='>f8', count=n2)
-		signalx = np.append(signalx, block)
-		block = np.fromfile(infile, dtype='>f8', count=n2)
-		signaly = np.append(signaly, block)
-	
-	infile.close()
-	return np.array([signalx, signaly])
 
 def tidy_analog_signal(y):
 	sorted_y = np.sort(y)
@@ -169,11 +38,46 @@ def tidy_analog_signal(y):
 	one_percent = int(len(y)*.01)
 	y = y - sorted_y[one_percent]
 		
-		
 	return y
 
 
-### GUI related classes ###
+def plot_analog_signals(data, width, height):
+	signals = data.analog_signals
+	
+	duration = data.nFrames/data.framerate
+	nsamples = int(duration*data.analogSamplerate)
+
+	y = signals[0,:nsamples]
+	y = tidy_analog_signal(y)
+	
+	q = int(len(y) / width)
+	if q > 1:
+		# Remove excess data points
+		y = y[::q]
+	
+	t = np.arange(0, len(y)) / data.analogSamplerate
+	
+	pyplot.clf()
+	fig = pyplot.gcf()
+	dpi = fig.get_dpi()
+	fig.set_size_inches(width / dpi, height / dpi)
+	
+	pyplot.plot(t, y, color='black')
+	
+	first_second = int(1*data.analogSamplerate/q)
+	pyplot.ylim(ymin=0, ymax=np.max(y[first_second:]))
+	pyplot.xlim(xmin=t[0], xmax=t[-1])
+	return fig
+
+
+def to_aligned_qimage(imgarr, format):
+	aligned = np.zeros((imgarr.shape[0], (imgarr.shape[1]+3)//4 * 4), dtype='uint8')
+	aligned[:,0:imgarr.shape[1]] = imgarr
+		
+	image_height, image_width = imgarr.shape
+	qimg = QImage(aligned.tobytes(), image_width, image_height, format)
+	return qimg
+
 
 class MeasurementData(QObject):
 	folderLoaded = pyqtSignal()
@@ -230,6 +134,7 @@ class MeasurementData(QObject):
 	
 	def getVideoSnapshot(self, frameindex, contrast=None, brightness=None):
 		imgdata = self.video_data[frameindex]
+		
 		if contrast != None and brightness != None:
 			maxvalue = (255 - brightness)/contrast
 			saturated_pixels = np.where(imgdata > maxvalue)
@@ -274,11 +179,10 @@ class DifferenceAnalyzer(QObject):
 		t_averaging = self._temporal_averaging
 		t0 = t - self._interval
 		interval = self._interval
-		if t0-t_averaging < 0: return None
-		
 		video_data = self._data.video_data
 		
 		if t_averaging:
+			if t0-t_averaging < 0: return None
 			if self._fast_averaging:
 				cur = np.mean(video_data[t-t_averaging:t], axis=0)
 				prev = np.mean(video_data[t0-t_averaging:t0], axis=0)
@@ -302,6 +206,8 @@ class DifferenceAnalyzer(QObject):
 		else:
 			result[valid] = difference[valid]
 		return result
+
+
 
 class SnapshotView(QQuickPaintedItem):
 	
@@ -343,6 +249,7 @@ class DifferenceOverlayImage(QQuickPaintedItem):
 		self._overlay_treshold = 1
 		self._smooth_radius = 0
 		self._analyzer = None
+		self.colormap = matplotlib.cm.get_cmap('hsv')
 
 	analyzer = map_property('QVariant', "_analyzer", on_modified='analyzer_added')
 	frame = map_property(int, "_frame", on_modified='update')
@@ -356,7 +263,6 @@ class DifferenceOverlayImage(QQuickPaintedItem):
 
 	def paint(self, painter):
 		self.draw_frame(painter, self._frame)
-		
 	
 	def draw_frame(self, painter, t):
 		if self.analyzer is None or not self.isVisible(): return
@@ -368,18 +274,11 @@ class DifferenceOverlayImage(QQuickPaintedItem):
 			frame = ndimage.gaussian_filter(frame, self._smooth_radius)
 	
 		imagearr = np.zeros((frame.shape[0], frame.shape[1], 4), dtype="uint8")
-		
-		colortable = np.array([colorsys.hsv_to_rgb(i, 1, 1) for i in np.linspace(0, 1, 256)])
-		def colormap(values, min, max):
-			indices = np.round(255*(values-min)/max).astype(int)
-			indices[indices > 255] = 255
-			colors = colortable[indices]
-			return colors
-        
+		        
 		pixels = np.where(frame > self.treshold)
-		colors = colormap(frame[pixels], self.treshold, self.treshold*5)
-		imagearr[:,:,:3][pixels] = 255*colors
-		imagearr[:,:,3][pixels] = 255
+		normalized_values = (frame[pixels]-self.treshold) / (self.treshold*5)
+		colors = self.colormap(normalized_values)
+		imagearr[:,:,][pixels] = 255*colors
 
 		imagestr = imagearr.flatten().tobytes()
 		image_height, image_width = frame.shape
@@ -402,61 +301,15 @@ class AnalogSignalPlot(QQuickPaintedItem):
 	
 	def paint(self, painter):
 		data = self._data
-		if data is None: return
-		signals = data.analog_signals
-		width = self.width()
-		height = self.height()
+		width, height = self.width(), self.height()
+		fig = plot_analog_signals(data, width, height)
+		pyplot.xticks([])
+		pyplot.yticks([])
+		pyplot.subplots_adjust(left=0, top=1, right=1, bottom=0)
+		fig.canvas.draw()
+		img = QImage(fig.canvas.buffer_rgba(), width, height, QImage.Format_ARGB32)
+		painter.drawImage(0, 0, img)
 		
-		duration = data.nFrames/data.framerate
-		nsamples = int(duration*data.analogSamplerate)
-
-		y = signals[0,:nsamples]
-		y = tidy_analog_signal(y)
-		
-		# Scale to 0 ... 1 ignoring first second
-		first_second = int(1*data.analogSamplerate)
-		y /= np.max(y[first_second:])
-		
-		y = 1 - y
-		y *= height
-				
-		x = np.linspace(0, width, len(y))
-		
-		from PyQt5.QtCore import QPointF
-		from PyQt5.QtGui import QPen
-		q = int(len(x) / width)
-		if q > 1:
-			# too much data
-			x = x[::q]
-			y = y[::q]
-		points = [QPointF(x[i], y[i]) for i in range(len(x))]
-		pen = QPen()
-		pen.setWidthF(1.5)
-		p = painter
-		p.setRenderHint(QPainter.Antialiasing, True)
-		p.setPen(pen)
-		p.drawPolyline(*points)
-		
-
-
-def create_colortable():
-	table = []
-	for i in range(256):
-		h = 255 - i
-		s = 255
-		l = i #64 + i*(256-64) // 256
-		table.append( QColor.fromHsl(h, s, l).rgb() )
-	return table
-		
-
-def to_aligned_qimage(imgarr, format):
-	aligned = np.zeros((imgarr.shape[0], (imgarr.shape[1]+3)//4 * 4), dtype='uint8')
-	aligned[:,0:imgarr.shape[1]] = imgarr
-		
-	image_height, image_width = imgarr.shape
-	qimg = QImage(aligned.tobytes(), image_width, image_height, format)
-	return qimg
-
 
 class Exporter(QObject):
 	@pyqtSlot(MeasurementData, 'QVariant', int, str)
@@ -539,30 +392,7 @@ class Exporter(QObject):
 		return img
 	
 	def get_analog_signals_plot(self, data, width, height):
-		# Fancier analog signal plot with Matplotlib
-		import matplotlib
-		matplotlib.use('Agg')
-		from matplotlib import pyplot
-		
-		signals = data.analog_signals
-		
-		duration = data.nFrames/data.framerate
-		nsamples = int(duration*data.analogSamplerate)
-
-		y = signals[0,:nsamples]
-		y = tidy_analog_signal(y)
-		
-		t = np.arange(0, len(y)) / data.analogSamplerate
-		
-		pyplot.clf()
-		fig = pyplot.gcf()
-		dpi = fig.get_dpi()
-		fig.set_size_inches(width / dpi, height / dpi)
-		pyplot.plot(t, y, 'r-')
-		
-		first_second = int(1*data.analogSamplerate)
-		pyplot.ylim(ymin=0, ymax=np.max(y[first_second:]))
-		pyplot.xlim(xmin=t[0], xmax=t[-1])
+		fig = plot_analog_signals(data, width, height)
 		pyplot.xlabel('Time (s)')
 		pyplot.ylabel('Load (N)')
 		left, top, right, bottom = .15, .1, .1, .2
@@ -571,74 +401,11 @@ class Exporter(QObject):
 		img = QImage(fig.canvas.buffer_rgba(), width, height, QImage.Format_ARGB32)
 		plot_area = (left*width, top*height, (1-left-right)*width, (1-top-bottom)*height)
 		return img, plot_area
-		
 
-"""
-class VideoExporter(QObject):
-	
-	@pyqtSlot(BandPassAnalyzer, str, int)
-	def saveVideoFrames(self, analyzer, folder, skip):
-		snapshotView = SnapshotView()
-		overlay = BPFOverlayImage()
-		analogSignalPlot = AnalogSignalPlot()
-		data = analyzer.measurementData
-		snapshotView.measurementData = data
-		overlay.analyzer = analyzer
-		overlay.treshold = 1
-		analogSignalPlot.measurementData = data
-		
-		t0 = analyzer.t0
-		nframes = analyzer.analysis.shape[0] // skip
-		
-		width = data.image_width
-		snapshot_height = data.image_height
-		overlay_width = analyzer.analysis.shape[2]
-		overlay_height = analyzer.analysis.shape[1]
-		overlay_x = analyzer.x0
-		overlay_y = analyzer.y0
-		plot_height = 200
-		
-		analogSignalPlot.setWidth(width)
-		analogSignalPlot.setHeight(plot_height)
-		
-		height = snapshot_height + plot_height
-		
-		for i in range(nframes):
-			frame = t0 + i*skip
-			overlay.frame = frame
-			overlay.frame = frame
-			analogSignalPlot.frame = frame
-			
-			snapshot_img = data.getVideoSnapshot(frame)
-			
-			overlay_img = QImage(overlay_width, overlay_height, QImage.Format_ARGB32)
-			overlay_img.fill(0)
-			overlay_painter = QPainter(overlay_img)
-			overlay.paint(overlay_painter)
-			overlay_painter.end()
-			
-			plot_img = QImage(width, plot_height, QImage.Format_ARGB32)
-			plot_img.fill(0xffffffff)
-			plot_painter = QPainter(plot_img)
-			analogSignalPlot.paint(plot_painter)
-			plot_painter.end()
-			
-			image = QImage(width, height, QImage.Format_ARGB32)
-			painter = QPainter(image)
-			
-			painter.drawImage(0, 0, snapshot_img)
-			painter.drawImage(overlay_x, overlay_y, overlay_img)
-			painter.drawImage(0, snapshot_height, plot_img)
-			painter.end()
-			
-			print('saving frame', i)
-			image.save('{0}/frame{1:03d}.png'.format(folder, i))	
-
-"""
 
 if __name__ == '__main__':
 	from PyQt5.QtQml import QQmlApplicationEngine
-	from PyQt5.QtGui import QGuiApplication
+	from PyQt5.QtWidgets import QApplication
 	import sys
 	
 	app = QApplication(sys.argv)
